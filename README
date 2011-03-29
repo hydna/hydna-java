@@ -1,0 +1,18 @@
+hydna-java
+
+Emanuel Dahlberg
+
+http://github.com/EmanueI
+===================================================================
+
+The framework is compile through Eclipse
+and four example targets can also be built.
+
+
+
+info
+-------------------------------------------------------------------
+All the source files can be found in src/hydna/ with comments.
+
+The examples are located in src/hydna/examples.
+
