@@ -124,11 +124,11 @@ public class ExtSocket implements Runnable {
 	/**
      *  Decrease the reference count.
      *
-     *  @param addr The address to dealloc.
+     *  @param addr The channel to dealloc.
      */
-	public void deallocStream(int addr) {
+	public void deallocStream(int ch) {
 		if (HydnaDebug.HYDNADEBUG) {
-			System.out.println("ExtSocket: Deallocating a stream with the addr " + addr);
+			System.out.println("ExtSocket: Deallocating a stream with the channel " + ch);
 		}
 		
         m_destroyingMutex.lock();
@@ -138,7 +138,7 @@ public class ExtSocket implements Runnable {
             m_destroyingMutex.unlock();
 
             m_openStreamsMutex.lock();
-            m_openStreams.remove(addr);
+            m_openStreams.remove(ch);
             
             if (HydnaDebug.HYDNADEBUG) {
             	System.out.println("ExtSocket: Size of openSteams is now " + m_openStreams.size());
@@ -189,7 +189,7 @@ public class ExtSocket implements Runnable {
      *  @return True if request went well, else false.
      */
 	public boolean requestOpen(OpenRequest request) {
-		int streamcomp = request.getAddr();
+		int streamcomp = request.getChannel();
         Queue<OpenRequest> queue;
 
         if (HydnaDebug.HYDNADEBUG) {
@@ -260,7 +260,7 @@ public class ExtSocket implements Runnable {
      *  @return True if the request was canceled.
      */
 	public boolean cancelOpen(OpenRequest request) {
-		int streamcomp = request.getAddr();
+		int streamcomp = request.getChannel();
         Queue<OpenRequest> queue;
         Queue<OpenRequest> tmp = new LinkedList<OpenRequest>();
         boolean found = false;
@@ -460,7 +460,7 @@ public class ExtSocket implements Runnable {
 	public void receiveHandler() {
 		int size;
         int headerSize = Packet.HEADER_SIZE;
-        int addr;
+        int ch;
         int op;
         int flag;
 
@@ -525,7 +525,7 @@ public class ExtSocket implements Runnable {
             payload.flip();
             
             header.get(); // Reserved
-            addr = header.getInt();
+            ch = header.getInt();
             byte of = header.get();
             op   = of >> 4;
             flag = of & 0xf;
@@ -536,21 +536,21 @@ public class ExtSocket implements Runnable {
                 	if (HydnaDebug.HYDNADEBUG) {
                 		System.out.println("ExtSocket: Received open response");
                 	}
-                    processOpenPacket(addr, flag, payload);
+                    processOpenPacket(ch, flag, payload);
                     break;
 
                 case Packet.DATA:
                 	if (HydnaDebug.HYDNADEBUG) {
                 		System.out.println("ExtSocket: Received data");
                 	}
-                    processDataPacket(addr, flag, payload);
+                    processDataPacket(ch, flag, payload);
                     break;
 
                 case Packet.SIGNAL:
                 	if (HydnaDebug.HYDNADEBUG) {
                 		System.out.println("ExtSocket: Received signal");
                 	}
-                    processSignalPacket(addr, flag, payload);
+                    processSignalPacket(ch, flag, payload);
                     break;
             }
 
@@ -570,13 +570,13 @@ public class ExtSocket implements Runnable {
      *  @param errcode The error code of the open packet.
      *  @param payload The content of the open packet.
      */
-	private void processOpenPacket(int addr, int errcode, ByteBuffer payload) {
+	private void processOpenPacket(int ch, int errcode, ByteBuffer payload) {
 		OpenRequest request;
         Stream stream;
-        int respaddr = 0;
+        int respch = 0;
         
         m_pendingMutex.lock();
-        request = m_pendingOpenRequests.get(addr);
+        request = m_pendingOpenRequests.get(ch);
         m_pendingMutex.unlock();
 
         if (request == null) {
@@ -587,22 +587,22 @@ public class ExtSocket implements Runnable {
         stream = request.getStream();
 
         if (errcode == Packet.OPEN_SUCCESS) {
-            respaddr = addr;
+            respch = ch;
         } else if (errcode == Packet.OPEN_REDIRECT) {
             if (payload == null || payload.capacity() < 4) {
-                destroy(new StreamError("Expected redirect addr from the server"));
+                destroy(new StreamError("Expected redirect channel from the server"));
                 return;
             }
 
-            respaddr = payload.getInt();
+            respch = payload.getInt();
 
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: Redirected from " + addr);
-            	System.out.println("ExtSocket:              to " + respaddr);
+            	System.out.println("ExtSocket: Redirected from " + ch);
+            	System.out.println("ExtSocket:              to " + respch);
             }
         } else {
             m_pendingMutex.lock();
-            m_pendingOpenRequests.remove(addr);
+            m_pendingOpenRequests.remove(ch);
             m_pendingMutex.unlock();
 
             String m = "";
@@ -625,32 +625,32 @@ public class ExtSocket implements Runnable {
 
 
         m_openStreamsMutex.lock();
-        if (m_openStreams.containsKey(respaddr)) {
+        if (m_openStreams.containsKey(respch)) {
             m_openStreamsMutex.unlock();
             destroy(new StreamError("Server redirected to open stream"));
             return;
         }
 
-        m_openStreams.put(respaddr, stream);
+        m_openStreams.put(respch, stream);
         if (HydnaDebug.HYDNADEBUG) {
         	System.out.println("ExtSocket: A new stream was added");
         	System.out.println("ExtSocket: The size of openStreams is now " + m_openStreams.size());
         }
         m_openStreamsMutex.unlock();
 
-        stream.openSuccess(respaddr);
+        stream.openSuccess(respch);
 
         m_openWaitMutex.lock();
         m_pendingMutex.lock();
-        if (m_openWaitQueue.containsKey(addr)) {
-            Queue<OpenRequest> queue = m_openWaitQueue.get(addr);
+        if (m_openWaitQueue.containsKey(ch)) {
+            Queue<OpenRequest> queue = m_openWaitQueue.get(ch);
             
             if (queue != null)
             {
                 // Destroy all pending request IF response wasn't a 
                 // redirected stream.
-                if (respaddr == addr) {
-                    m_pendingOpenRequests.remove(addr);
+                if (respch == ch) {
+                    m_pendingOpenRequests.remove(ch);
 
                     StreamError error = new StreamError("Stream already open");
 
@@ -663,17 +663,17 @@ public class ExtSocket implements Runnable {
                 }
 
                 request = queue.poll();
-                m_pendingOpenRequests.put(addr, request);
+                m_pendingOpenRequests.put(ch, request);
 
                 if (queue.isEmpty()) {
-                    m_openWaitQueue.remove(addr);
+                    m_openWaitQueue.remove(ch);
                 }
 
                 writeBytes(request.getPacket());
                 request.setSent(true);
             }
         } else {
-            m_pendingOpenRequests.remove(addr);
+            m_pendingOpenRequests.remove(ch);
         }
         m_pendingMutex.unlock();
         m_openWaitMutex.unlock();
@@ -686,13 +686,13 @@ public class ExtSocket implements Runnable {
      *  @param priority The priority of the data.
      *  @param payload The content of the data.
      */
-	private void processDataPacket(int addr, int priority, ByteBuffer payload) {
+	private void processDataPacket(int ch, int priority, ByteBuffer payload) {
 		Stream stream = null;
         StreamData data;
         
         m_openStreamsMutex.lock();
-        if (m_openStreams.containsKey(addr))
-            stream = m_openStreams.get(addr);
+        if (m_openStreams.containsKey(ch))
+            stream = m_openStreams.get(ch);
         m_openStreamsMutex.unlock();
 
         if (stream == null) {
@@ -755,8 +755,8 @@ public class ExtSocket implements Runnable {
      *  @param flag The flag of the signal.
      *  @param payload The content of the signal.
      */
-	private void processSignalPacket(int addr, int flag, ByteBuffer payload) {
-		if (addr == 0) {
+	private void processSignalPacket(int ch, int flag, ByteBuffer payload) {
+		if (ch == 0) {
             m_openStreamsMutex.lock();
             boolean destroying = false;
             int size = payload.capacity();
@@ -803,14 +803,23 @@ public class ExtSocket implements Runnable {
             m_openStreamsMutex.lock();
             Stream stream = null;
 
-            if (m_openStreams.containsKey(addr))
-                stream = m_openStreams.get(addr);
+            if (m_openStreams.containsKey(ch))
+                stream = m_openStreams.get(ch);
 
             if (stream == null) {
                 m_openStreamsMutex.unlock();
-                destroy(new StreamError("Packet sent to unknown stream"));
+                destroy(new StreamError("Received unknown channel"));
                 return;
             }
+            
+            if (flag > 0x0 && !stream.isClosing()) {
+            	m_openStreamsMutex.unlock();
+            	
+            	Packet packet = new Packet(ch, Packet.SIGNAL, Packet.SIG_END, payload);
+				writeBytes(packet);
+				
+				return;
+			}
 
             processSignalPacket(stream, flag, payload);
             m_openStreamsMutex.unlock();
@@ -860,7 +869,7 @@ public class ExtSocket implements Runnable {
         }
         for (Stream stream : m_openStreams.values()) {
         	if (HydnaDebug.HYDNADEBUG) {
-        		System.out.println("ExtSocket: Destroying stream of key " + stream.getAddr());
+        		System.out.println("ExtSocket: Destroying stream of key " + stream.getChannel());
         	}
             stream.destroy(error);
         }				

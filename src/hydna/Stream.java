@@ -14,11 +14,12 @@ import java.util.concurrent.locks.ReentrantLock;
 public class Stream {
 	private String m_host ="";
 	private short m_port = 7010;
-	private int m_addr = 1;
+	private int m_ch = 0;
 	
 	private ExtSocket m_socket = null;
 	private boolean m_connected = false;
-	private boolean m_pendingClose = false;
+	private boolean m_closing = false;
+	private Packet m_pendingClose;
 	
 	private boolean m_readable = false;
 	private boolean m_writable = false;
@@ -54,6 +55,18 @@ public class Stream {
 	}
 	
 	/**
+     *  Checks the closing state for this Stream instance.
+     *
+     *  @return The closing state.
+     */
+	public boolean isClosing() {
+		m_connectMutex.lock();
+		boolean result = m_closing;
+		m_connectMutex.unlock();
+		return result;
+	}
+	
+	/**
      *  Checks if the stream is readable.
      *
      *  @return True if stream is readable.
@@ -84,19 +97,19 @@ public class Stream {
      */
 	public boolean hasSignalSupport() {
 		m_connectMutex.lock();
-        boolean result = m_connected && m_emitable && !m_pendingClose;
+        boolean result = m_connected && m_emitable;
         m_connectMutex.unlock();
         return result;
 	}
 	
 	/**
-     *  Returns the addr that this instance listen to.
+     *  Returns the channel that this instance listen to.
      *
-     *  @return addr The address.
+     *  @return The channel.
      */
-	public int getAddr() {
+	public int getChannel() {
 		m_connectMutex.lock();
-        int result = m_addr;
+        int result = m_ch;
         m_connectMutex.unlock();
         return result;
 	}
@@ -104,10 +117,10 @@ public class Stream {
 	/**
      *  Resets the error.
      *  
-     *  Connects the stream to the specified addr. If the connection fails 
+     *  Connects the stream to the specified channel. If the connection fails 
      *  immediately, an exception is thrown.
      *
-     *  @param expr The address to connect to,
+     *  @param expr The channel to connect to,
      *  @param mode The mode in which to open the stream.
      */
 	public void connect(String expr, int mode) throws StreamError {
@@ -117,10 +130,10 @@ public class Stream {
 	/**
      *  Resets the error.
      *  
-     *  Connects the stream to the specified addr. If the connection fails 
+     *  Connects the stream to the specified channel. If the connection fails 
      *  immediately, an exception is thrown.
      *
-     *  @param expr The address to connect to,
+     *  @param expr The channel to connect to,
      *  @param mode The mode in which to open the stream.
      *  @param token An optional token.
      */
@@ -137,7 +150,7 @@ public class Stream {
 
         if (mode == 0x04 ||
                 mode < StreamMode.READ || 
-                mode > StreamMode.READWRITE_EMIT) {
+                mode > StreamMode.READWRITEEMIT) {
             throw new StreamError("Invalid stream mode");
         }
       
@@ -149,7 +162,7 @@ public class Stream {
 
         String host = expr;
         short port = 7010;
-        int addr = 1;
+        int ch = 1;
         String tokens = "";
         int pos;
         
@@ -162,7 +175,7 @@ public class Stream {
         pos = host.lastIndexOf("/x");
         if (pos != -1) {
             try {
-            	addr = Integer.parseInt(host.substring(pos + 2), 16);
+            	ch = Integer.parseInt(host.substring(pos + 2), 16);
             } catch (NumberFormatException e) {
             	throw new StreamError("Could not read the address \"" + host.substring(pos + 2) + "\"");
             }
@@ -172,7 +185,7 @@ public class Stream {
             pos = host.lastIndexOf("/");
             if (pos != -1) {
                 try {
-                	addr = Integer.parseInt(host.substring(pos + 1), 10);
+                	ch = Integer.parseInt(host.substring(pos + 1), 10);
                 } catch (NumberFormatException e) {
                    throw new StreamError("Could not read the address \"" + host.substring(pos + 1) + "\""); 
                 }
@@ -194,7 +207,7 @@ public class Stream {
         
         m_host = host;
         m_port = port;
-        m_addr = addr;
+        m_ch = ch;
 
         m_socket = ExtSocket.getSocket(m_host, m_port);
       
@@ -202,12 +215,12 @@ public class Stream {
         m_socket.allocStream();
 
         if (token != null || tokens == "") {
-            packet = new Packet(m_addr, Packet.OPEN, mode, token);
+            packet = new Packet(m_ch, Packet.OPEN, mode, token);
         } else {
-            packet = new Packet(m_addr, Packet.OPEN, mode, ByteBuffer.wrap(tokens.getBytes()));
+            packet = new Packet(m_ch, Packet.OPEN, mode, ByteBuffer.wrap(tokens.getBytes()));
         }
       
-        request = new OpenRequest(this, m_addr, packet);
+        request = new OpenRequest(this, m_ch, packet);
 
         m_error = new StreamError("", 0x0);
       
@@ -236,7 +249,7 @@ public class Stream {
         }
         m_connectMutex.unlock();
 
-        if ((m_mode & StreamMode.WRITE) != StreamMode.WRITE) {
+        if (!m_writable) {
             throw new StreamError("Stream is not writable");
         }
       
@@ -244,7 +257,7 @@ public class Stream {
             throw new StreamError("Priority must be between 1 - 3");
         }
 
-        Packet packet = new Packet(m_addr, Packet.DATA, priority,
+        Packet packet = new Packet(m_ch, Packet.DATA, priority,
                                 data);
       
         m_connectMutex.lock();
@@ -291,11 +304,11 @@ public class Stream {
         }
         m_connectMutex.unlock();
 
-        if ((m_mode & StreamMode.EMIT) != StreamMode.EMIT) {
+        if (!m_emitable) {
             throw new StreamError("You do not have permission to send signals");
         }
 
-        Packet packet = new Packet(m_addr, Packet.SIGNAL, type,
+        Packet packet = new Packet(m_ch, Packet.SIGNAL, type,
                             data);
 
         m_connectMutex.lock();
@@ -340,25 +353,48 @@ public class Stream {
      */
 	public void close() {
 		m_connectMutex.lock();
-        if (m_socket == null || m_pendingClose) {
+        if (m_socket == null || m_closing) {
             m_connectMutex.unlock();
             return;
         }
+        
+        m_closing = true;
+        m_readable = false;
+        m_writable = false;
+        m_emitable = false;
       
+        if (m_openRequest != null && m_socket.cancelOpen(m_openRequest)) {
+        	// Open request hasn't been posted yet, which means that it's
+            // safe to destroy stream immediately.
+        	
+        	m_openRequest = null;
+        	m_connectMutex.unlock();
+        	
+        	StreamError error = new StreamError("", 0x0);
+        	destroy(error);
+        	return;
+        }
+        
+        Packet packet = new Packet(m_ch, Packet.SIGNAL, Packet.SIG_END);
+        
         if (m_openRequest != null) {
-            if (m_socket.cancelOpen(m_openRequest)) {
-                m_openRequest = null;
-                m_connectMutex.unlock();
-                
-                StreamError error = new StreamError("", 0x0);
-                destroy(error);
-            } else {
-                m_pendingClose = true;
-                m_connectMutex.unlock();
-            }
+        	// Open request is not responded to yet. Wait to send ENDSIG until	
+            // we get an OPENRESP.
+        	
+        	m_pendingClose = packet;
+        	m_connectMutex.unlock();
         } else {
-            m_connectMutex.unlock();
-            internalClose();
+        	m_connectMutex.unlock();
+        	
+        	if (HydnaDebug.HYDNADEBUG) {
+				System.out.println("Stream: Sending close signal");
+			}
+        	
+        	m_connectMutex.lock();
+        	ExtSocket socket = m_socket;
+        	m_connectMutex.unlock();
+        	socket.writeBytes(packet);
+        	
         }
 	}
 	
@@ -456,17 +492,37 @@ public class Stream {
      *  Internal callback for open success.
      *  Used by the ExtSocket class.
      *
-     *  @param respaddr The response address.
+     *  @param respch The response channel.
      */
-	protected void openSuccess(int respaddr) {
+	protected void openSuccess(int respch) {
 		m_connectMutex.lock();
-        m_addr = respaddr;
+		int origch = m_ch;
+		Packet packet;
+		
+		m_openRequest = null;
+        m_ch = respch;
         m_connected = true;
-        m_openRequest = null;
       
-        if (m_pendingClose) {
+        if (m_pendingClose != null) {
+        	packet = m_pendingClose;
+        	m_pendingClose = null;
             m_connectMutex.unlock();
-            internalClose();
+            
+            if (origch != respch) {
+            	// channel is changed. We need to change the channel of the
+                //packet before sending to server.
+            	
+            	packet.setChannel(respch);
+			}
+            
+            if (HydnaDebug.HYDNADEBUG) {
+				System.out.println("Stream: Sending close signal");
+			}
+            
+			m_connectMutex.lock();
+			ExtSocket socket = m_socket;
+			m_connectMutex.unlock();
+			socket.writeBytes(packet);
         } else {
             m_connectMutex.unlock();
         }
@@ -479,47 +535,25 @@ public class Stream {
      */
 	protected void destroy(StreamError error) {
 		m_connectMutex.lock();
+		ExtSocket socket = m_socket;
+		boolean connected = m_connected;
+		int ch = m_ch;
 
-        m_pendingClose = false;
+		m_ch = 0;
+		m_connected = false;
         m_writable = false;
         m_readable = false;
-      
-        if (m_socket != null) {
-            m_socket.deallocStream(m_connected ? m_addr : 0);
-        }
-
-        m_connected = false;
-        m_addr = 1;
+        m_pendingClose = null;
+        m_closing = false;
         m_openRequest = null;
         m_socket = null;
+      
+        if (socket != null) {
+            socket.deallocStream(connected ? ch : 0);
+        }
+        
         m_error = error;
 
         m_connectMutex.unlock();
-	}
-	
-	/**
-     *  Internally close the stream.
-     */
-	private void internalClose() {
-		m_connectMutex.lock();
-        if (m_socket != null && m_connected) {
-            m_connectMutex.unlock();
-            
-			if (HydnaDebug.HYDNADEBUG) {
-				System.out.println("Stream: Sending close signal");
-			}
-			
-            Packet packet = new Packet(m_addr, Packet.SIGNAL, Packet.SIG_END, null);
-
-            m_connectMutex.lock();
-            ExtSocket socket = m_socket;
-            m_connectMutex.unlock();
-            socket.writeBytes(packet);
-        } else {
-            m_connectMutex.unlock();
-        }
-
-        StreamError error = new StreamError("", 0x0);
-        destroy(error);
 	}
 }

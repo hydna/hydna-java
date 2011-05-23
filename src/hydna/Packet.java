@@ -46,7 +46,7 @@ public class Packet {
 	
 	private ByteBuffer m_bytes;
 	
-	public Packet(int addr, int op, int flag, ByteBuffer payload) {
+	public Packet(int ch, int op, int flag, ByteBuffer payload) {
 		super();
 		
 		short length = HEADER_SIZE;
@@ -64,7 +64,7 @@ public class Packet {
 		
 		m_bytes.putShort(length);
 		m_bytes.put((byte) 0); // Reserved
-		m_bytes.putInt(addr);
+		m_bytes.putInt(ch);
 		m_bytes.put((byte) (op << 4 | flag));
 		
 		if (payload != null) {
@@ -74,7 +74,15 @@ public class Packet {
 		m_bytes.flip();
 	}
 	
+	public Packet(int ch, int op, int flag) {
+		this(ch, op, flag, null);
+	}
+	
 	public ByteBuffer getData() {
 		return m_bytes;
+	}
+	
+	void setChannel (int value) {
+		m_bytes.putInt(3, value);
 	}
 }

@@ -6,13 +6,13 @@ package hydna;
  */
 public class OpenRequest {
 	private Stream m_stream;
-	private int m_addr;
+	private int m_ch;
 	private Packet m_packet;
 	private boolean m_sent = false;
 	
-	public OpenRequest(Stream stream, int addr, Packet packet) {
+	public OpenRequest(Stream stream, int ch, Packet packet) {
 		m_stream = stream;
-		m_addr = addr;
+		m_ch = ch;
 		m_packet = packet;
 	}
 	
@@ -20,8 +20,8 @@ public class OpenRequest {
 		return m_stream;
 	}
 	
-	public int getAddr() {
-		return m_addr;
+	public int getChannel() {
+		return m_ch;
 	}
 	
 	public Packet getPacket() {

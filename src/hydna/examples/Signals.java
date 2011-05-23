@@ -16,7 +16,7 @@ import hydna.StreamSignal;
 public class Signals {
 	public static void main(String[] args) throws CharacterCodingException, StreamError, InterruptedException {
 		Stream stream = new Stream();
-	    stream.connect("localhost/x00112233", StreamMode.READWRITE_EMIT);
+	    stream.connect("localhost/x00112233", StreamMode.READWRITEEMIT);
 
 	    while(!stream.isConnected()) {
 	        stream.checkForStreamError();
