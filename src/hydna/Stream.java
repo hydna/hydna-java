@@ -387,7 +387,7 @@ public class Stream {
         	m_connectMutex.unlock();
         	
         	if (HydnaDebug.HYDNADEBUG) {
-				System.out.println("Stream: Sending close signal");
+        		DebugHelper.debugPrint("Stream", m_ch, "Sending close signal");
 			}
         	
         	m_connectMutex.lock();
@@ -516,7 +516,7 @@ public class Stream {
 			}
             
             if (HydnaDebug.HYDNADEBUG) {
-				System.out.println("Stream: Sending close signal");
+            	DebugHelper.debugPrint("Stream", m_ch, "Sending close signal");
 			}
             
 			m_connectMutex.lock();

@@ -117,7 +117,7 @@ public class ExtSocket implements Runnable {
         m_streamRefMutex.unlock();
         
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Allocating a new stream, stream ref count is " + m_streamRefCount);
+        	DebugHelper.debugPrint("ExtSocket", 0, "Allocating a new stream, stream ref count is " + m_streamRefCount);
         }
 	}
 	
@@ -128,7 +128,7 @@ public class ExtSocket implements Runnable {
      */
 	public void deallocStream(int ch) {
 		if (HydnaDebug.HYDNADEBUG) {
-			System.out.println("ExtSocket: Deallocating a stream with the channel " + ch);
+			DebugHelper.debugPrint("ExtSocket", ch, "Deallocating a stream");
 		}
 		
         m_destroyingMutex.lock();
@@ -141,7 +141,7 @@ public class ExtSocket implements Runnable {
             m_openStreams.remove(ch);
             
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: Size of openSteams is now " + m_openStreams.size());
+            	DebugHelper.debugPrint("ExtSocket", ch, "Size of openSteams is now " + m_openStreams.size());
         	}
             m_openStreamsMutex.unlock();
         } else  {
@@ -164,7 +164,7 @@ public class ExtSocket implements Runnable {
         if (m_streamRefCount == 0) {
             m_streamRefMutex.unlock();
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: No more refs, destroy socket");
+            	DebugHelper.debugPrint("ExtSocket", 0, "No more refs, destroy socket");
             }
             
             m_destroyingMutex.lock();
@@ -189,19 +189,19 @@ public class ExtSocket implements Runnable {
      *  @return True if request went well, else false.
      */
 	public boolean requestOpen(OpenRequest request) {
-		int streamcomp = request.getChannel();
+		int chcomp = request.getChannel();
         Queue<OpenRequest> queue;
 
         if (HydnaDebug.HYDNADEBUG) {
-            System.out.println("ExtSocket: A stream is trying to send a new open request");
+        	DebugHelper.debugPrint("ExtSocket", chcomp, "A stream is trying to send a new open request");
         }
 
         m_openStreamsMutex.lock();
-        if (m_openStreams.containsKey(streamcomp)) {
+        if (m_openStreams.containsKey(chcomp)) {
             m_openStreamsMutex.unlock();
             
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: The stream was already open, cancel the open request");
+            	DebugHelper.debugPrint("ExtSocket", chcomp, "The stream was already open, cancel the open request");
             }
             
             return false;
@@ -209,29 +209,29 @@ public class ExtSocket implements Runnable {
         m_openStreamsMutex.unlock();
 
         m_pendingMutex.lock();
-        if (m_pendingOpenRequests.containsKey(streamcomp)) {
+        if (m_pendingOpenRequests.containsKey(chcomp)) {
             m_pendingMutex.unlock();
 
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: A open request is waiting to be sent, queue up the new open request");
+            	DebugHelper.debugPrint("ExtSocket", chcomp, "A open request is waiting to be sent, queue up the new open request");
             }
             
             m_openWaitMutex.lock();
-            queue = m_openWaitQueue.get(streamcomp);
+            queue = m_openWaitQueue.get(chcomp);
         
             if (queue == null) {
             	queue = new LinkedList<OpenRequest>();
-                m_openWaitQueue.put(streamcomp, queue);
+                m_openWaitQueue.put(chcomp, queue);
             } 
         
             queue.add(request);
             m_openWaitMutex.unlock();
         } else if (!m_handshaked) {
         	if (HydnaDebug.HYDNADEBUG) {
-        		System.out.println("ExtSocket: The socket was not connected, queue up the new open request");
+        		DebugHelper.debugPrint("ExtSocket", chcomp, "The socket was not connected, queue up the new open request");
         	}
             
-        	m_pendingOpenRequests.put(streamcomp, request);
+        	m_pendingOpenRequests.put(chcomp, request);
             m_pendingMutex.unlock();
             
             if (!m_connecting) {
@@ -239,10 +239,11 @@ public class ExtSocket implements Runnable {
                 connectSocket(m_host, m_port);
             }
         } else {
+        	m_pendingOpenRequests.put(chcomp, request);
             m_pendingMutex.unlock();
 
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: The socket was already connected, sending the new open request");
+            	DebugHelper.debugPrint("ExtSocket", chcomp, "The socket was already connected, sending the new open request");
             }
 
             writeBytes(request.getPacket());
@@ -319,7 +320,7 @@ public class ExtSocket implements Runnable {
      */
 	private void connectSocket(String host, int port) {
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Connecting socket");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Connecting socket");
         }
         
         try {
@@ -351,7 +352,7 @@ public class ExtSocket implements Runnable {
      */
 	private void connectHandler() {
 		if (HydnaDebug.HYDNADEBUG) {
-			System.out.println("ExtSocket: Socket connected, sending handshake");
+			DebugHelper.debugPrint("ExtSocket", 0, "Socket connected, sending handshake");
 		}
 		
         int length = m_host.length();
@@ -386,7 +387,7 @@ public class ExtSocket implements Runnable {
         String prefix = "DNA1";
 
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Incoming handshake response on socket");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Incoming handshake response on socket");
         }
         
         try {
@@ -417,7 +418,7 @@ public class ExtSocket implements Runnable {
         m_connecting = false;
 
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Handshake done on socket");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Handshake done on socket");
         }
 
         for (OpenRequest request : m_pendingOpenRequests.values()) {
@@ -426,7 +427,7 @@ public class ExtSocket implements Runnable {
             if (m_connected) {
                 request.setSent(true);
                 if (HydnaDebug.HYDNADEBUG) {
-                	System.out.println("ExtSocket: Open request sent");
+                	DebugHelper.debugPrint("ExtSocket", request.getChannel(), "Open request sent");
                 }
             } else {
                 return;
@@ -434,7 +435,7 @@ public class ExtSocket implements Runnable {
         }
 
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Creating a new thread for packet listening");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Creating a new thread for packet listening");
         }
 
         try {
@@ -534,21 +535,21 @@ public class ExtSocket implements Runnable {
 
                 case Packet.OPEN:
                 	if (HydnaDebug.HYDNADEBUG) {
-                		System.out.println("ExtSocket: Received open response");
+                		DebugHelper.debugPrint("ExtSocket", ch, "Received open response");
                 	}
                     processOpenPacket(ch, flag, payload);
                     break;
 
                 case Packet.DATA:
                 	if (HydnaDebug.HYDNADEBUG) {
-                		System.out.println("ExtSocket: Received data");
+                		DebugHelper.debugPrint("ExtSocket", ch, "Received data");
                 	}
                     processDataPacket(ch, flag, payload);
                     break;
 
                 case Packet.SIGNAL:
                 	if (HydnaDebug.HYDNADEBUG) {
-                		System.out.println("ExtSocket: Received signal");
+                		DebugHelper.debugPrint("ExtSocket", ch, "Received signal");
                 	}
                     processSignalPacket(ch, flag, payload);
                     break;
@@ -559,7 +560,7 @@ public class ExtSocket implements Runnable {
             header.clear();
         }
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Listening thread exited");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Listening thread exited");
         }
 	}
 	
@@ -597,8 +598,8 @@ public class ExtSocket implements Runnable {
             respch = payload.getInt();
 
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: Redirected from " + ch);
-            	System.out.println("ExtSocket:              to " + respch);
+            	DebugHelper.debugPrint("ExtSocket",     ch, "Redirected from " + ch);
+            	DebugHelper.debugPrint("ExtSocket", respch, "             to " + respch);
             }
         } else {
             m_pendingMutex.lock();
@@ -615,7 +616,7 @@ public class ExtSocket implements Runnable {
             }
 
             if (HydnaDebug.HYDNADEBUG) {
-            	System.out.println("ExtSocket: The server rejected the open request, errorcode " + errcode);
+            	DebugHelper.debugPrint("ExtSocket", ch, "The server rejected the open request, errorcode " + errcode);
             }
 
             StreamError error = StreamError.fromOpenError(errcode, m);
@@ -633,8 +634,8 @@ public class ExtSocket implements Runnable {
 
         m_openStreams.put(respch, stream);
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: A new stream was added");
-        	System.out.println("ExtSocket: The size of openStreams is now " + m_openStreams.size());
+        	DebugHelper.debugPrint("ExtSocket", respch, "A new stream was added");
+        	DebugHelper.debugPrint("ExtSocket", respch, "The size of openStreams is now " + m_openStreams.size());
         }
         m_openStreamsMutex.unlock();
 
@@ -837,15 +838,18 @@ public class ExtSocket implements Runnable {
         m_destroyingMutex.unlock();
 
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Destroying socket because: " + error.getMessage());
+        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying socket because: " + error.getMessage());
         }
 
         m_pendingMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Destroying pendingOpenRequests of size " + m_pendingOpenRequests.size());
+        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying pendingOpenRequests of size " + m_pendingOpenRequests.size());
         }
         
         for (OpenRequest request : m_pendingOpenRequests.values()) {
+        	if (HydnaDebug.HYDNADEBUG) {
+            	DebugHelper.debugPrint("ExtSocket", request.getChannel(), "Destroying stream");
+            }
 			request.getStream().destroy(error);
 		}
         m_pendingOpenRequests.clear();
@@ -853,7 +857,7 @@ public class ExtSocket implements Runnable {
 
         m_openWaitMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Destroying waitQueue of size " + m_openWaitQueue.size());
+        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying waitQueue of size " + m_openWaitQueue.size());
         }
         for (Queue<OpenRequest> queue : m_openWaitQueue.values()) {
             while(queue != null && !queue.isEmpty()) {
@@ -865,11 +869,11 @@ public class ExtSocket implements Runnable {
         
         m_openStreamsMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Destroying openStreams of size " + m_openStreams.size());
+        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying openStreams of size " + m_openStreams.size());
         }
         for (Stream stream : m_openStreams.values()) {
         	if (HydnaDebug.HYDNADEBUG) {
-        		System.out.println("ExtSocket: Destroying stream of key " + stream.getChannel());
+        		DebugHelper.debugPrint("ExtSocket", stream.getChannel(), "Destroying stream");
         	}
             stream.destroy(error);
         }				
@@ -878,7 +882,7 @@ public class ExtSocket implements Runnable {
 
         if (m_connected) {
         	if (HydnaDebug.HYDNADEBUG) {
-        		System.out.println("ExtSocket: Closing socket");
+        		DebugHelper.debugPrint("ExtSocket", 0, "Closing socket");
         	}
             m_listeningMutex.lock();
             m_listening = false;
@@ -901,7 +905,7 @@ public class ExtSocket implements Runnable {
         m_socketMutex.unlock();
 
         if (HydnaDebug.HYDNADEBUG) {
-        	System.out.println("ExtSocket: Destroying socket done");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying socket done");
         }
         
         m_destroyingMutex.lock();
