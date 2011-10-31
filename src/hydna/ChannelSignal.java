@@ -2,11 +2,11 @@ package hydna;
 
 import java.nio.ByteBuffer;
 
-public class StreamSignal {
+public class ChannelSignal {
 	private int m_type;
 	private ByteBuffer m_content;
 	
-	public StreamSignal(int type, ByteBuffer content) {
+	public ChannelSignal(int type, ByteBuffer content) {
 		m_type = type;
 		m_content = content;
 	}
@@ -21,7 +21,7 @@ public class StreamSignal {
 	}
 	
 	/**
-     *  Returns the content associated with this StreamSignal instance.
+     *  Returns the content associated with this ChannelSignal instance.
      *
      *  @return The content.
      */

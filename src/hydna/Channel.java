@@ -11,7 +11,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *  A user of the library should use an instance of this class
  *  to communicate with a server.
  */
-public class Stream {
+public class Channel {
 	private String m_host ="";
 	private short m_port = 7010;
 	private int m_ch = 0;
@@ -25,25 +25,25 @@ public class Stream {
 	private boolean m_writable = false;
 	private boolean m_emitable = false;
 	
-	private StreamError m_error = new StreamError("", 0x0);
+	private ChannelError m_error = new ChannelError("", 0x0);
 	
 	private int m_mode;
 	private OpenRequest m_openRequest = null;
 	
-	private Queue<StreamData> m_dataQueue = new LinkedList<StreamData>();
-	private Queue<StreamSignal> m_signalQueue = new LinkedList<StreamSignal>();
+	private Queue<ChannelData> m_dataQueue = new LinkedList<ChannelData>();
+	private Queue<ChannelSignal> m_signalQueue = new LinkedList<ChannelSignal>();
 	
 	private Lock m_dataMutex = new ReentrantLock();
 	private Lock m_signalMutex = new ReentrantLock();
 	private Lock m_connectMutex = new ReentrantLock();
 	
 	/**
-     *  Initializes a new Stream instance
+     *  Initializes a new Channel instance
      */
-	public Stream() {}
+	public Channel() {}
 	
 	/**
-     *  Checks the connected state for this Stream instance.
+     *  Checks the connected state for this Channel instance.
      *
      *  @return The connected state.
      */
@@ -55,7 +55,7 @@ public class Stream {
 	}
 	
 	/**
-     *  Checks the closing state for this Stream instance.
+     *  Checks the closing state for this Channel instance.
      *
      *  @return The closing state.
      */
@@ -67,9 +67,9 @@ public class Stream {
 	}
 	
 	/**
-     *  Checks if the stream is readable.
+     *  Checks if the channel is readable.
      *
-     *  @return True if stream is readable.
+     *  @return True if channel is readable.
      */
 	public boolean isReadable() {
 		m_connectMutex.lock();
@@ -79,9 +79,9 @@ public class Stream {
 	}
 	
 	/**
-     *  Checks if the stream is writable.
+     *  Checks if the channel is writable.
      *
-     *  @return True if stream is writable.
+     *  @return True if channel is writable.
      */
 	public boolean isWritable() {
 		m_connectMutex.lock();
@@ -91,9 +91,9 @@ public class Stream {
 	}
 	
 	/**
-     *  Checks if the stream can emit signals.
+     *  Checks if the channel can emit signals.
      *
-     *  @return True if stream has signal support.
+     *  @return True if channel has signal support.
      */
 	public boolean hasSignalSupport() {
 		m_connectMutex.lock();
@@ -117,48 +117,48 @@ public class Stream {
 	/**
      *  Resets the error.
      *  
-     *  Connects the stream to the specified channel. If the connection fails 
+     *  Connects the channel to the specified channel. If the connection fails 
      *  immediately, an exception is thrown.
      *
      *  @param expr The channel to connect to,
-     *  @param mode The mode in which to open the stream.
+     *  @param mode The mode in which to open the channel.
      */
-	public void connect(String expr, int mode) throws StreamError {
+	public void connect(String expr, int mode) throws ChannelError {
 		connect(expr, mode, null);
 	}
 	
 	/**
      *  Resets the error.
      *  
-     *  Connects the stream to the specified channel. If the connection fails 
+     *  Connects the channel to the specified channel. If the connection fails 
      *  immediately, an exception is thrown.
      *
      *  @param expr The channel to connect to,
-     *  @param mode The mode in which to open the stream.
+     *  @param mode The mode in which to open the channel.
      *  @param token An optional token.
      */
-	public void connect(String expr, int mode, ByteBuffer token) throws StreamError {
+	public void connect(String expr, int mode, ByteBuffer token) throws ChannelError {
 		Packet packet;
         OpenRequest request;
       
         m_connectMutex.lock();
         if (m_socket != null) {
             m_connectMutex.unlock();
-            throw new StreamError("Already connected");
+            throw new ChannelError("Already connected");
         }
         m_connectMutex.unlock();
 
         if (mode == 0x04 ||
-                mode < StreamMode.READ || 
-                mode > StreamMode.READWRITEEMIT) {
-            throw new StreamError("Invalid stream mode");
+                mode < ChannelMode.READ || 
+                mode > ChannelMode.READWRITEEMIT) {
+            throw new ChannelError("Invalid channel mode");
         }
       
         m_mode = mode;
       
-        m_readable = ((m_mode & StreamMode.READ) == StreamMode.READ);
-        m_writable = ((m_mode & StreamMode.WRITE) == StreamMode.WRITE);
-        m_emitable = ((m_mode & StreamMode.EMIT) == StreamMode.EMIT);
+        m_readable = ((m_mode & ChannelMode.READ) == ChannelMode.READ);
+        m_writable = ((m_mode & ChannelMode.WRITE) == ChannelMode.WRITE);
+        m_emitable = ((m_mode & ChannelMode.EMIT) == ChannelMode.EMIT);
 
         String host = expr;
         short port = 7010;
@@ -177,7 +177,7 @@ public class Stream {
             try {
             	ch = Integer.parseInt(host.substring(pos + 2), 16);
             } catch (NumberFormatException e) {
-            	throw new StreamError("Could not read the address \"" + host.substring(pos + 2) + "\"");
+            	throw new ChannelError("Could not read the address \"" + host.substring(pos + 2) + "\"");
             }
             
             host = host.substring(0, pos);
@@ -187,7 +187,7 @@ public class Stream {
                 try {
                 	ch = Integer.parseInt(host.substring(pos + 1), 10);
                 } catch (NumberFormatException e) {
-                   throw new StreamError("Could not read the address \"" + host.substring(pos + 1) + "\""); 
+                   throw new ChannelError("Could not read the address \"" + host.substring(pos + 1) + "\""); 
                 }
                 
                 host = host.substring(0, pos);
@@ -199,7 +199,7 @@ public class Stream {
         	try {
         	port = Short.parseShort(host.substring(pos + 1), 10);
         	} catch (NumberFormatException e) {
-               throw new StreamError("Could not read the port \"" + host.substring(pos + 1) + "\""); 
+               throw new ChannelError("Could not read the port \"" + host.substring(pos + 1) + "\""); 
             }
         	
         	host = host.substring(0, pos);
@@ -212,7 +212,7 @@ public class Stream {
         m_socket = ExtSocket.getSocket(m_host, m_port);
       
         // Ref count
-        m_socket.allocStream();
+        m_socket.allocChannel();
 
         if (token != null || tokens == "") {
             packet = new Packet(m_ch, Packet.OPEN, mode, token);
@@ -222,39 +222,39 @@ public class Stream {
       
         request = new OpenRequest(this, m_ch, packet);
 
-        m_error = new StreamError("", 0x0);
+        m_error = new ChannelError("", 0x0);
       
         if (!m_socket.requestOpen(request)) {
-            checkForStreamError();
-            throw new StreamError("Stream already open");
+            checkForChannelError();
+            throw new ChannelError("Channel already open");
         }
 
         m_openRequest = request;
 	}
 	
 	/**
-     *  Sends data to the stream.
+     *  Sends data to the channel.
      *
-     *  @param data The data to write to the stream.
+     *  @param data The data to write to the channel.
      *  @param priority The priority of the data.
      */
-	public void writeBytes(ByteBuffer data, int priority) throws StreamError {
+	public void writeBytes(ByteBuffer data, int priority) throws ChannelError {
 		boolean result;
 
         m_connectMutex.lock();
         if (!m_connected || m_socket == null) {
             m_connectMutex.unlock();
-            checkForStreamError();
-            throw new StreamError("Stream is not connected");
+            checkForChannelError();
+            throw new ChannelError("Channel is not connected");
         }
         m_connectMutex.unlock();
 
         if (!m_writable) {
-            throw new StreamError("Stream is not writable");
+            throw new ChannelError("Channel is not writable");
         }
       
         if (priority > 3 || priority == 0) {
-            throw new StreamError("Priority must be between 1 - 3");
+            throw new ChannelError("Priority must be between 1 - 3");
         }
 
         Packet packet = new Packet(m_ch, Packet.DATA, priority,
@@ -266,46 +266,46 @@ public class Stream {
         result = socket.writeBytes(packet);
 
         if (!result)
-            checkForStreamError();
+            checkForChannelError();
 	}
 	
 	/**
-     *  Sends data to the stream.
+     *  Sends data to the channel.
      *
-     *  @param data The data to write to the stream.
+     *  @param data The data to write to the channel.
      */
-	public void writeBytes(ByteBuffer data) throws StreamError {
+	public void writeBytes(ByteBuffer data) throws ChannelError {
 		writeBytes(data, 1);
 	}
 	
 	/**
-     *  Sends string data to the stream.
+     *  Sends string data to the channel.
      *
      *  @param value The string to be sent.
      */
-	public void writeString(String value) throws StreamError {
+	public void writeString(String value) throws ChannelError {
 		writeBytes(ByteBuffer.wrap(value.getBytes()));
 	}
 	
 	/**
-     *  Sends data signal to the stream.
+     *  Sends data signal to the channel.
      *
-     *  @param data The data to write to the stream..
+     *  @param data The data to write to the channel.
      *  @param type The type of the signal.
      */
-	public void emitBytes(ByteBuffer data, int type) throws StreamError {
+	public void emitBytes(ByteBuffer data, int type) throws ChannelError {
 		boolean result;
 
         m_connectMutex.lock();
         if (!m_connected || m_socket == null) {
             m_connectMutex.unlock();
-            checkForStreamError();
-            throw new StreamError("Stream is not connected.");
+            checkForChannelError();
+            throw new ChannelError("Channel is not connected.");
         }
         m_connectMutex.unlock();
 
         if (!m_emitable) {
-            throw new StreamError("You do not have permission to send signals");
+            throw new ChannelError("You do not have permission to send signals");
         }
 
         Packet packet = new Packet(m_ch, Packet.SIGNAL, type,
@@ -317,39 +317,39 @@ public class Stream {
         result = socket.writeBytes(packet);
 
         if (!result)
-            checkForStreamError();
+            checkForChannelError();
 	}
 	
 	/**
-     *  Sends data signal to the stream.
+     *  Sends data signal to the channel.
      *
-     *  @param data The data to write to the stream..
+     *  @param data The data to write to the channel.
      */
-	public void emitBytes(ByteBuffer data) throws StreamError {
+	public void emitBytes(ByteBuffer data) throws ChannelError {
 		emitBytes(data, 0);
 	}
 	
 	/**
-     *  Sends a string signal to the stream.
+     *  Sends a string signal to the channel.
      *
      *  @param value The string to be sent.
      *  @param type The type of the signal.
      */
-	public void emitString(String value, int type) throws StreamError {
+	public void emitString(String value, int type) throws ChannelError {
 		emitBytes(ByteBuffer.wrap(value.getBytes()), type);
 	}
 	
 	/**
-     *  Sends a string signal to the stream.
+     *  Sends a string signal to the channel.
      *
      *  @param value The string to be sent.
      */
-	public void emitString(String value) throws StreamError {
+	public void emitString(String value) throws ChannelError {
 		emitString(value, 0);
 	}
 	
 	/**
-     *  Closes the Stream instance.
+     *  Closes the Channel instance.
      */
 	public void close() {
 		m_connectMutex.lock();
@@ -365,12 +365,12 @@ public class Stream {
       
         if (m_openRequest != null && m_socket.cancelOpen(m_openRequest)) {
         	// Open request hasn't been posted yet, which means that it's
-            // safe to destroy stream immediately.
+            // safe to destroy channel immediately.
         	
         	m_openRequest = null;
         	m_connectMutex.unlock();
         	
-        	StreamError error = new StreamError("", 0x0);
+        	ChannelError error = new ChannelError("", 0x0);
         	destroy(error);
         	return;
         }
@@ -387,7 +387,7 @@ public class Stream {
         	m_connectMutex.unlock();
         	
         	if (HydnaDebug.HYDNADEBUG) {
-        		DebugHelper.debugPrint("Stream", m_ch, "Sending close signal");
+        		DebugHelper.debugPrint("Channel", m_ch, "Sending close signal");
 			}
         	
         	m_connectMutex.lock();
@@ -399,10 +399,10 @@ public class Stream {
 	}
 	
 	/**
-     *  Checks if some error has occured in the stream
+     *  Checks if some error has occurred in the channel
      *  and throws an exception if that is the case.
      */
-	public void checkForStreamError() throws StreamError {
+	public void checkForChannelError() throws ChannelError {
 		m_connectMutex.lock();
         if (m_error.getCode() != 0x0) {
             m_connectMutex.unlock();
@@ -417,7 +417,7 @@ public class Stream {
      *
      *  @param data The data to add to queue.
      */
-	protected void addData(StreamData data) {
+	protected void addData(ChannelData data) {
 		m_dataMutex.lock();
 		m_dataQueue.add(data);
 		m_dataMutex.unlock();
@@ -429,9 +429,9 @@ public class Stream {
      *  @return The data that was removed from the queue,
      *          or NULL if the queue was empty.
      */
-	public StreamData popData() {
+	public ChannelData popData() {
 		m_dataMutex.lock();
-        StreamData data = m_dataQueue.poll();
+        ChannelData data = m_dataQueue.poll();
         m_dataMutex.unlock();
         
         return data;
@@ -455,7 +455,7 @@ public class Stream {
      *
      *  @param signal The signal to add to the queue.
      */
-	protected void addSignal(StreamSignal signal) {
+	protected void addSignal(ChannelSignal signal) {
 		m_signalMutex.lock();
 		m_signalQueue.add(signal);
 		m_signalMutex.unlock();
@@ -467,9 +467,9 @@ public class Stream {
      *  @return The signal that was removed from the queue,
      *          or NULL if the queue was empty.
      */
-	public StreamSignal popSignal() {
+	public ChannelSignal popSignal() {
 		m_signalMutex.lock();
-		StreamSignal signal = m_signalQueue.poll();
+		ChannelSignal signal = m_signalQueue.poll();
 		m_signalMutex.unlock();
 		
 		return signal;
@@ -516,7 +516,7 @@ public class Stream {
 			}
             
             if (HydnaDebug.HYDNADEBUG) {
-            	DebugHelper.debugPrint("Stream", m_ch, "Sending close signal");
+            	DebugHelper.debugPrint("Channel", m_ch, "Sending close signal");
 			}
             
 			m_connectMutex.lock();
@@ -533,7 +533,7 @@ public class Stream {
      *
      *  @param error The cause of the destroy.
      */
-	protected void destroy(StreamError error) {
+	protected void destroy(ChannelError error) {
 		m_connectMutex.lock();
 		ExtSocket socket = m_socket;
 		boolean connected = m_connected;
@@ -549,7 +549,7 @@ public class Stream {
         m_socket = null;
       
         if (socket != null) {
-            socket.deallocStream(connected ? ch : 0);
+            socket.deallocChannel(connected ? ch : 0);
         }
         
         m_error = error;

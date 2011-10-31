@@ -2,11 +2,11 @@ package hydna;
 
 import java.nio.ByteBuffer;
 
-public class StreamData {
+public class ChannelData {
 	private int m_priority;
 	private ByteBuffer m_content;
 	
-	public StreamData(int priority, ByteBuffer content) {
+	public ChannelData(int priority, ByteBuffer content) {
 		m_priority = priority;
 		m_content = content;
 	}
@@ -21,7 +21,7 @@ public class StreamData {
 	}
 	
 	/**
-     *  Returns the data associated with this StreamData instance.
+     *  Returns the data associated with this ChannelData instance.
      *
      *  @return The content.
      */

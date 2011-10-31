@@ -1,6 +1,6 @@
 package hydna;
 
-public class StreamMode {
+public class ChannelMode {
 	public static final int LISTEN = 0x00;
 	public static final int READ = 0x01;
 	public static final int WRITE = 0x02;

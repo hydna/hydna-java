@@ -1,26 +1,26 @@
 package hydna;
 
 /**
- *  This class is used internally by both the Stream and the ExtSocket class.
+ *  This class is used internally by both the Channel and the ExtSocket class.
  *  A user of the library should not create an instance of this class.
  */
 public class OpenRequest {
-	private Stream m_stream;
+	private Channel m_channel;
 	private int m_ch;
 	private Packet m_packet;
 	private boolean m_sent = false;
 	
-	public OpenRequest(Stream stream, int ch, Packet packet) {
-		m_stream = stream;
+	public OpenRequest(Channel channel, int ch, Packet packet) {
+		m_channel = channel;
 		m_ch = ch;
 		m_packet = packet;
 	}
 	
-	public Stream getStream() {
-		return m_stream;
+	public Channel getChannel() {
+		return m_channel;
 	}
 	
-	public int getChannel() {
+	public int getChannelId() {
 		return m_ch;
 	}
 	

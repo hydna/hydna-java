@@ -5,29 +5,29 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 
-import hydna.Stream;
-import hydna.StreamError;
-import hydna.StreamMode;
-import hydna.StreamSignal;
+import hydna.Channel;
+import hydna.ChannelError;
+import hydna.ChannelMode;
+import hydna.ChannelSignal;
 
 /**
  *  Signal example
  */
 public class Signals {
-	public static void main(String[] args) throws CharacterCodingException, StreamError, InterruptedException {
-		Stream stream = new Stream();
-	    stream.connect("localhost/x00112233", StreamMode.READWRITEEMIT);
+	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
+		Channel channel = new Channel();
+	    channel.connect("localhost/x00112233", ChannelMode.READWRITEEMIT);
 
-	    while(!stream.isConnected()) {
-	        stream.checkForStreamError();
+	    while(!channel.isConnected()) {
+	        channel.checkForChannelError();
 	        Thread.sleep(1000);
 	    }
 
-	    stream.emitString("ping");
+	    channel.emitString("ping");
 
 	    for (;;) {
-	        if (!stream.isSignalEmpty()) {
-	            StreamSignal signal = stream.popSignal();
+	        if (!channel.isSignalEmpty()) {
+	            ChannelSignal signal = channel.popSignal();
 	            ByteBuffer payload = signal.getContent();
 
 	            Charset charset = Charset.forName("US-ASCII");
@@ -39,9 +39,9 @@ public class Signals {
 	            
 	            break;
 	        } else {
-	            stream.checkForStreamError();
+	            channel.checkForChannelError();
 	        }
 	    }
-	    stream.close();
+	    channel.close();
 	}
 }

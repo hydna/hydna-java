@@ -1,7 +1,7 @@
 package hydna.examples;
 
-import hydna.Stream;
-import hydna.StreamMode;
+import hydna.Channel;
+import hydna.ChannelMode;
 
 public class SpeedTest {
 	static final int NO_BROADCASTS = 100000;
@@ -18,11 +18,11 @@ public class SpeedTest {
 	    try { 
 	        String arg = args[0];
 
-	        Stream stream = new Stream();
-	        stream.connect("localhost/x11221133", StreamMode.READWRITE);
+	        Channel channel = new Channel();
+	        channel.connect("localhost/x11221133", ChannelMode.READWRITE);
 
-	        while(!stream.isConnected()) {
-	            stream.checkForStreamError();
+	        while(!channel.isConnected()) {
+	            channel.checkForChannelError();
 	            Thread.sleep(1000);
 	        }
 	        
@@ -32,8 +32,8 @@ public class SpeedTest {
 	            System.out.println("Receiving from x11221133");
 
 	            for(;;) {
-	                if (!stream.isDataEmpty()) {
-	                    stream.popData();
+	                if (!channel.isDataEmpty()) {
+	                    channel.popData();
 
 	                    if (i == 0) {
 	                        time = System.nanoTime();
@@ -48,7 +48,7 @@ public class SpeedTest {
 	                        i = 0;
 	                    }
 	                } else {
-	                    stream.checkForStreamError();
+	                    channel.checkForChannelError();
 	                }
 	            }
 	        } else if (arg.equals("send")) {
@@ -57,7 +57,7 @@ public class SpeedTest {
 	            time = System.nanoTime();
 
 	            for (i = 0; i < NO_BROADCASTS; i++) {
-	                stream.writeString(CONTENT);
+	                channel.writeString(CONTENT);
 	            }
 
 	            time = System.nanoTime() - time;
@@ -66,11 +66,11 @@ public class SpeedTest {
 
 	            i = 0;
 	            while(i < NO_BROADCASTS) {
-	                if (!stream.isDataEmpty()) {
-	                    stream.popData();
+	                if (!channel.isDataEmpty()) {
+	                    channel.popData();
 	                    i++;
 	                } else {
-	                    stream.checkForStreamError();
+	                    channel.checkForChannelError();
 	                }
 	            }
 	        } else {
@@ -78,7 +78,7 @@ public class SpeedTest {
 	            return;
 	        }
 
-	        stream.close();
+	        channel.close();
 	    } catch (Exception e) {
 	        System.out.println("Caught exception (i=" + i + "): " + e.getMessage());
 	    }

@@ -1,19 +1,19 @@
 package hydna;
 
-public class StreamError extends Exception {
+public class ChannelError extends Exception {
 	private static final long serialVersionUID = -7144874937032709941L;
 	private int m_code;
 
-	public StreamError(String message, int code) {
+	public ChannelError(String message, int code) {
 		super(message);
 		m_code = code;
 	}
 	
-	public StreamError(String message) {
+	public ChannelError(String message) {
 		this(message, -1);
 	}
 	
-	public static StreamError fromHandshakeError(int flag) {
+	public static ChannelError fromHandshakeError(int flag) {
 		int code = 0xFFFF;
         String msg;
 
@@ -41,40 +41,40 @@ public class StreamError extends Exception {
                 break;
         }
 
-        return new StreamError(msg, code);
+        return new ChannelError(msg, code);
 	}
 	
-	public static StreamError fromOpenError(int flag, String data) {
+	public static ChannelError fromOpenError(int flag, String data) {
 		int code = flag;
         String msg;
 
         switch (code) {
             case Packet.OPEN_FAIL_NA:
-                msg = "Failed to open stream, not available";
+                msg = "Failed to open channel, not available";
                 break;
             case Packet.OPEN_FAIL_MODE:
-                msg = "Not allowed to open stream with specified mode";
+                msg = "Not allowed to open channel with specified mode";
                 break;
             case Packet.OPEN_FAIL_PROTOCOL:
-                msg = "Not allowed to open stream with specified protocol";
+                msg = "Not allowed to open channel with specified protocol";
                 break;
             case Packet.OPEN_FAIL_HOST:
-                msg = "Not allowed to open stream from host";
+                msg = "Not allowed to open channel from host";
                 break;
             case Packet.OPEN_FAIL_AUTH:
-                msg = "Not allowed to open stream with credentials";
+                msg = "Not allowed to open channel with credentials";
                 break;
             case Packet.OPEN_FAIL_SERVICE_NA:
-                msg = "Failed to open stream, service is not available";
+                msg = "Failed to open channel, service is not available";
                 break;
             case Packet.OPEN_FAIL_SERVICE_ERR:
-                msg = "Failed to open stream, service error";
+                msg = "Failed to open channel, service error";
                 break;
 
             default:
             case Packet.OPEN_FAIL_OTHER:
                 code = Packet.OPEN_FAIL_OTHER;
-                msg = "Failed to open stream, unknown error";
+                msg = "Failed to open channel, unknown error";
                 break;
         }
 
@@ -82,10 +82,10 @@ public class StreamError extends Exception {
             msg = data;
         }
 
-        return new StreamError(msg, code);
+        return new ChannelError(msg, code);
 	}
 	
-	public static StreamError fromSigError(int flag, String data) {
+	public static ChannelError fromSigError(int flag, String data) {
 		int code = flag;
         String msg;
 
@@ -117,7 +117,7 @@ public class StreamError extends Exception {
             msg = data;
         }
 
-        return new StreamError(msg, code);
+        return new ChannelError(msg, code);
 	}
 	
 	public int getCode() {

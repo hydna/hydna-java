@@ -5,38 +5,38 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 
-import hydna.Stream;
-import hydna.StreamData;
-import hydna.StreamError;
-import hydna.StreamMode;
+import hydna.Channel;
+import hydna.ChannelData;
+import hydna.ChannelError;
+import hydna.ChannelMode;
 
 /**
- *  Multiple streams example
+ *  Multiple channels example
  */
-public class MultipleStreams {
-	public static void main(String[] args) throws CharacterCodingException, StreamError, InterruptedException {
-		Stream stream = new Stream();
-	    stream.connect("localhost/x11221133", StreamMode.READWRITE);
+public class MultipleChannels {
+	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
+		Channel channel = new Channel();
+	    channel.connect("localhost/x11221133", ChannelMode.READWRITE);
 	    
-	    Stream stream2 = new Stream();
-	    stream2.connect("localhost/x3333", StreamMode.READWRITE);
+	    Channel channel2 = new Channel();
+	    channel2.connect("localhost/x3333", ChannelMode.READWRITE);
 	
-	    while(!stream.isConnected()) {
-	        stream.checkForStreamError();
+	    while(!channel.isConnected()) {
+	        channel.checkForChannelError();
 	        Thread.sleep(1000);
 	    }
 	    
-	    while(!stream2.isConnected()) {
-	        stream2.checkForStreamError();
+	    while(!channel2.isConnected()) {
+	        channel2.checkForChannelError();
 	        Thread.sleep(1000);
 	    }
 	
-	    stream.writeString("Hello");
-	    stream2.writeString("World");
+	    channel.writeString("Hello");
+	    channel2.writeString("World");
 	
 	    for (;;) {
-	        if (!stream.isDataEmpty()) {
-	            StreamData data = stream.popData();
+	        if (!channel.isDataEmpty()) {
+	            ChannelData data = channel.popData();
 	            ByteBuffer payload = data.getContent();
 	
 	            Charset charset = Charset.forName("US-ASCII");
@@ -48,13 +48,13 @@ public class MultipleStreams {
             	
 	            break;
 	        } else {
-	            stream.checkForStreamError();
+	            channel.checkForChannelError();
 	        }
 	    }
 	    
 	    for (;;) {
-	        if (!stream2.isDataEmpty()) {
-	            StreamData data = stream2.popData();
+	        if (!channel2.isDataEmpty()) {
+	            ChannelData data = channel2.popData();
 	            ByteBuffer payload = data.getContent();
 	
 	            Charset charset = Charset.forName("US-ASCII");
@@ -66,11 +66,11 @@ public class MultipleStreams {
             	
 	            break;
 	        } else {
-	            stream2.checkForStreamError();
+	            channel2.checkForChannelError();
 	        }
 	    }
 	    
-	    stream.close();
-	    stream2.close();
+	    channel.close();
+	    channel2.close();
 	}
 }

@@ -23,7 +23,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- *  This class is used internally by the Stream class.
+ *  This class is used internally by the Channel class.
  *  A user of the library should not create an instance of this class.
  */
 public class ExtSocket implements Runnable {
@@ -32,10 +32,10 @@ public class ExtSocket implements Runnable {
 	private static Map<String, ExtSocket> m_availableSockets = new HashMap<String, ExtSocket>();
 	private static Lock m_socketMutex = new ReentrantLock();
 	
-	private Lock m_streamRefMutex = new ReentrantLock();
+	private Lock m_channelRefMutex = new ReentrantLock();
 	private Lock m_destroyingMutex = new ReentrantLock();
 	private Lock m_closingMutex = new ReentrantLock();
-	private Lock m_openStreamsMutex = new ReentrantLock();
+	private Lock m_openChannelsMutex = new ReentrantLock();
 	private Lock m_openWaitMutex = new ReentrantLock();
 	private Lock m_pendingMutex = new ReentrantLock();
 	private Lock m_listeningMutex = new ReentrantLock();
@@ -56,10 +56,10 @@ public class ExtSocket implements Runnable {
 	private DataInputStream m_inStream;
 	
 	private Map<Integer, OpenRequest> m_pendingOpenRequests = new HashMap<Integer, OpenRequest>();
-	private Map<Integer, Stream> m_openStreams = new HashMap<Integer, Stream>();
+	private Map<Integer, Channel> m_openChannels = new HashMap<Integer, Channel>();
 	private Map<Integer, Queue<OpenRequest>> m_openWaitQueue = new HashMap<Integer, Queue<OpenRequest>>();
 	
-	private int m_streamRefCount = 0;
+	private int m_channelRefCount = 0;
 	
 	private Thread m_listeningThread;
 	
@@ -88,7 +88,7 @@ public class ExtSocket implements Runnable {
 	}
 	
 	/**
-     *  Initializes a new Stream instance.
+     *  Initializes a new Channel instance.
      *
      *  @param host The host the socket should connect to.
      *  @param port The port the socket should connect to.
@@ -108,16 +108,16 @@ public class ExtSocket implements Runnable {
 	}
 	
 	/**
-     * Method to keep track of the number of streams that is associated 
+     * Method to keep track of the number of channels that is associated 
      * with this socket instance.
      */
-	public void allocStream() {
-		m_streamRefMutex.lock();
-        m_streamRefCount++;
-        m_streamRefMutex.unlock();
+	public void allocChannel() {
+		m_channelRefMutex.lock();
+        m_channelRefCount++;
+        m_channelRefMutex.unlock();
         
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("ExtSocket", 0, "Allocating a new stream, stream ref count is " + m_streamRefCount);
+        	DebugHelper.debugPrint("ExtSocket", 0, "Allocating a new channel, channel ref count is " + m_channelRefCount);
         }
 	}
 	
@@ -126,9 +126,9 @@ public class ExtSocket implements Runnable {
      *
      *  @param addr The channel to dealloc.
      */
-	public void deallocStream(int ch) {
+	public void deallocChannel(int ch) {
 		if (HydnaDebug.HYDNADEBUG) {
-			DebugHelper.debugPrint("ExtSocket", ch, "Deallocating a stream");
+			DebugHelper.debugPrint("ExtSocket", ch, "Deallocating a channel");
 		}
 		
         m_destroyingMutex.lock();
@@ -137,21 +137,21 @@ public class ExtSocket implements Runnable {
             m_closingMutex.unlock();
             m_destroyingMutex.unlock();
 
-            m_openStreamsMutex.lock();
-            m_openStreams.remove(ch);
+            m_openChannelsMutex.lock();
+            m_openChannels.remove(ch);
             
             if (HydnaDebug.HYDNADEBUG) {
-            	DebugHelper.debugPrint("ExtSocket", ch, "Size of openSteams is now " + m_openStreams.size());
+            	DebugHelper.debugPrint("ExtSocket", ch, "Size of openSteams is now " + m_openChannels.size());
         	}
-            m_openStreamsMutex.unlock();
+            m_openChannelsMutex.unlock();
         } else  {
             m_closingMutex.unlock();
             m_destroyingMutex.unlock();
         }
       
-        m_streamRefMutex.lock();
-        --m_streamRefCount;
-        m_streamRefMutex.unlock();
+        m_channelRefMutex.lock();
+        --m_channelRefCount;
+        m_channelRefMutex.unlock();
 
         checkRefCount();
 	}
@@ -160,9 +160,9 @@ public class ExtSocket implements Runnable {
      *  Check if there are any more references to the socket.
      */
 	private void checkRefCount() {
-		m_streamRefMutex.lock();
-        if (m_streamRefCount == 0) {
-            m_streamRefMutex.unlock();
+		m_channelRefMutex.lock();
+        if (m_channelRefCount == 0) {
+            m_channelRefMutex.unlock();
             if (HydnaDebug.HYDNADEBUG) {
             	DebugHelper.debugPrint("ExtSocket", 0, "No more refs, destroy socket");
             }
@@ -172,41 +172,41 @@ public class ExtSocket implements Runnable {
             if (!m_destroying && !m_closing) {
                 m_closingMutex.unlock();
                 m_destroyingMutex.unlock();
-                destroy(new StreamError("", 0x0));
+                destroy(new ChannelError("", 0x0));
             } else {
                 m_closingMutex.unlock();
                 m_destroyingMutex.unlock();
             }
         } else {
-            m_streamRefMutex.unlock();
+            m_channelRefMutex.unlock();
         }
 	}
 	
 	/**
-     *  Request to open a stream.
+     *  Request to open a channel.
      *
-     *  @param request The request to open the stream.
+     *  @param request The request to open the channel.
      *  @return True if request went well, else false.
      */
 	public boolean requestOpen(OpenRequest request) {
-		int chcomp = request.getChannel();
+		int chcomp = request.getChannelId();
         Queue<OpenRequest> queue;
 
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("ExtSocket", chcomp, "A stream is trying to send a new open request");
+        	DebugHelper.debugPrint("ExtSocket", chcomp, "A channel is trying to send a new open request");
         }
 
-        m_openStreamsMutex.lock();
-        if (m_openStreams.containsKey(chcomp)) {
-            m_openStreamsMutex.unlock();
+        m_openChannelsMutex.lock();
+        if (m_openChannels.containsKey(chcomp)) {
+            m_openChannelsMutex.unlock();
             
             if (HydnaDebug.HYDNADEBUG) {
-            	DebugHelper.debugPrint("ExtSocket", chcomp, "The stream was already open, cancel the open request");
+            	DebugHelper.debugPrint("ExtSocket", chcomp, "The channel was already open, cancel the open request");
             }
             
             return false;
         }
-        m_openStreamsMutex.unlock();
+        m_openChannelsMutex.unlock();
 
         m_pendingMutex.lock();
         if (m_pendingOpenRequests.containsKey(chcomp)) {
@@ -261,7 +261,7 @@ public class ExtSocket implements Runnable {
      *  @return True if the request was canceled.
      */
 	public boolean cancelOpen(OpenRequest request) {
-		int streamcomp = request.getChannel();
+		int channelcomp = request.getChannelId();
         Queue<OpenRequest> queue;
         Queue<OpenRequest> tmp = new LinkedList<OpenRequest>();
         boolean found = false;
@@ -271,14 +271,14 @@ public class ExtSocket implements Runnable {
         }
       
         m_openWaitMutex.lock();
-        queue = m_openWaitQueue.get(streamcomp);
+        queue = m_openWaitQueue.get(channelcomp);
       
         m_pendingMutex.lock();
-        if (m_pendingOpenRequests.containsKey(streamcomp)) {
-            m_pendingOpenRequests.remove(streamcomp);
+        if (m_pendingOpenRequests.containsKey(channelcomp)) {
+            m_pendingOpenRequests.remove(channelcomp);
         
             if (queue != null && queue.size() > 0)  {
-                m_pendingOpenRequests.put(streamcomp, queue.poll());
+                m_pendingOpenRequests.put(channelcomp, queue.poll());
             }
 
             m_pendingMutex.unlock();
@@ -341,9 +341,9 @@ public class ExtSocket implements Runnable {
         	
         	connectHandler();
         } catch (UnresolvedAddressException e) {
-        	destroy(new StreamError("The host \"" + host + "\" could not be resolved"));
+        	destroy(new ChannelError("The host \"" + host + "\" could not be resolved"));
         } catch (IOException e) {
-        	destroy(new StreamError("Could not connect to the host \"" + host + "\""));
+        	destroy(new ChannelError("Could not connect to the host \"" + host + "\""));
         }
 	}
 	
@@ -371,7 +371,7 @@ public class ExtSocket implements Runnable {
         }
 
         if (!success) {
-            destroy(new StreamError("Could not send handshake"));
+            destroy(new ChannelError("Could not send handshake"));
         } else {
             handshakeHandler();
         }
@@ -397,7 +397,7 @@ public class ExtSocket implements Runnable {
         }
 
         if (n != HANDSHAKE_RESP_SIZE) {
-            destroy(new StreamError("Server responded with bad handshake"));
+            destroy(new ChannelError("Server responded with bad handshake"));
             return;
         }
 
@@ -405,12 +405,12 @@ public class ExtSocket implements Runnable {
         data[HANDSHAKE_RESP_SIZE - 1] = '\0';
         
         if (!prefix.equals(new String(data, 0, HANDSHAKE_RESP_SIZE - 1, Charset.forName("US-ASCII")))) {
-            destroy(new StreamError("Server responded with bad handshake"));
+            destroy(new ChannelError("Server responded with bad handshake"));
             return;
         }
 
         if (responseCode > 0) {
-            destroy(StreamError.fromHandshakeError(responseCode));
+            destroy(ChannelError.fromHandshakeError(responseCode));
             return;
         }
 
@@ -427,7 +427,7 @@ public class ExtSocket implements Runnable {
             if (m_connected) {
                 request.setSent(true);
                 if (HydnaDebug.HYDNADEBUG) {
-                	DebugHelper.debugPrint("ExtSocket", request.getChannel(), "Open request sent");
+                	DebugHelper.debugPrint("ExtSocket", request.getChannelId(), "Open request sent");
                 }
             } else {
                 return;
@@ -442,7 +442,7 @@ public class ExtSocket implements Runnable {
         m_listeningThread = new Thread(this);
         m_listeningThread.start();
         } catch (IllegalThreadStateException e) {
-            destroy(new StreamError("Could not create a new thread for packet listening"));
+            destroy(new ChannelError("Could not create a new thread for packet listening"));
             return;
         }
 	}
@@ -456,7 +456,7 @@ public class ExtSocket implements Runnable {
 	}
 	
 	/**
-     *  Handles all incomming data.
+     *  Handles all incoming data.
      */
 	public void receiveHandler() {
 		int size;
@@ -490,7 +490,7 @@ public class ExtSocket implements Runnable {
                 m_listeningMutex.lock();
                 if (m_listening) {
                     m_listeningMutex.unlock();
-                    destroy(new StreamError("Could not read from the socket"));
+                    destroy(new ChannelError("Could not read from the socket"));
                 } else {
                 	m_listeningMutex.unlock();
                 }
@@ -516,7 +516,7 @@ public class ExtSocket implements Runnable {
                 m_listeningMutex.lock();
                 if (m_listening) {
                     m_listeningMutex.unlock();
-                    destroy(new StreamError("Could not read from the socket"));
+                    destroy(new ChannelError("Could not read from the socket"));
                 } else {
                 	m_listeningMutex.unlock();
                 }
@@ -573,7 +573,7 @@ public class ExtSocket implements Runnable {
      */
 	private void processOpenPacket(int ch, int errcode, ByteBuffer payload) {
 		OpenRequest request;
-        Stream stream;
+        Channel channel;
         int respch = 0;
         
         m_pendingMutex.lock();
@@ -581,17 +581,17 @@ public class ExtSocket implements Runnable {
         m_pendingMutex.unlock();
 
         if (request == null) {
-            destroy(new StreamError("The server sent a invalid open packet"));
+            destroy(new ChannelError("The server sent a invalid open packet"));
             return;
         }
 
-        stream = request.getStream();
+        channel = request.getChannel();
 
         if (errcode == Packet.OPEN_SUCCESS) {
             respch = ch;
         } else if (errcode == Packet.OPEN_REDIRECT) {
             if (payload == null || payload.capacity() < 4) {
-                destroy(new StreamError("Expected redirect channel from the server"));
+                destroy(new ChannelError("Expected redirect channel from the server"));
                 return;
             }
 
@@ -619,27 +619,26 @@ public class ExtSocket implements Runnable {
             	DebugHelper.debugPrint("ExtSocket", ch, "The server rejected the open request, errorcode " + errcode);
             }
 
-            StreamError error = StreamError.fromOpenError(errcode, m);
-            stream.destroy(error);
+            ChannelError error = ChannelError.fromOpenError(errcode, m);
+            channel.destroy(error);
             return;
         }
 
-
-        m_openStreamsMutex.lock();
-        if (m_openStreams.containsKey(respch)) {
-            m_openStreamsMutex.unlock();
-            destroy(new StreamError("Server redirected to open stream"));
+        m_openChannelsMutex.lock();
+        if (m_openChannels.containsKey(respch)) {
+            m_openChannelsMutex.unlock();
+            destroy(new ChannelError("Server redirected to open channel"));
             return;
         }
 
-        m_openStreams.put(respch, stream);
+        m_openChannels.put(respch, channel);
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("ExtSocket", respch, "A new stream was added");
-        	DebugHelper.debugPrint("ExtSocket", respch, "The size of openStreams is now " + m_openStreams.size());
+        	DebugHelper.debugPrint("ExtSocket", respch, "A new channel was added");
+        	DebugHelper.debugPrint("ExtSocket", respch, "The size of openChannels is now " + m_openChannels.size());
         }
-        m_openStreamsMutex.unlock();
+        m_openChannelsMutex.unlock();
 
-        stream.openSuccess(respch);
+        channel.openSuccess(respch);
 
         m_openWaitMutex.lock();
         m_pendingMutex.lock();
@@ -649,15 +648,15 @@ public class ExtSocket implements Runnable {
             if (queue != null)
             {
                 // Destroy all pending request IF response wasn't a 
-                // redirected stream.
+                // redirected channel.
                 if (respch == ch) {
                     m_pendingOpenRequests.remove(ch);
 
-                    StreamError error = new StreamError("Stream already open");
+                    ChannelError error = new ChannelError("Channel already open");
 
                     while (!queue.isEmpty()) {
                         request = queue.poll();
-                        request.getStream().destroy(error);
+                        request.getChannel().destroy(error);
                     }
 
                     return;
@@ -688,38 +687,38 @@ public class ExtSocket implements Runnable {
      *  @param payload The content of the data.
      */
 	private void processDataPacket(int ch, int priority, ByteBuffer payload) {
-		Stream stream = null;
-        StreamData data;
+		Channel channel = null;
+        ChannelData data;
         
-        m_openStreamsMutex.lock();
-        if (m_openStreams.containsKey(ch))
-            stream = m_openStreams.get(ch);
-        m_openStreamsMutex.unlock();
+        m_openChannelsMutex.lock();
+        if (m_openChannels.containsKey(ch))
+            channel = m_openChannels.get(ch);
+        m_openChannelsMutex.unlock();
 
-        if (stream == null) {
-            destroy(new StreamError("No stream was available to take care of the data received"));
+        if (channel == null) {
+            destroy(new ChannelError("No channel was available to take care of the data received"));
             return;
         }
 
         if (payload == null || payload.capacity() == 0) {
-            destroy(new StreamError("Zero data packet received"));
+            destroy(new ChannelError("Zero data packet received"));
             return;
         }
 
-        data = new StreamData(priority, payload);
-        stream.addData(data);
+        data = new ChannelData(priority, payload);
+        channel.addData(data);
 	}
 	
 	/**
      *  Process a signal packet.
      *
-     *  @param stream The stream that should receive the signal.
+     *  @param channel The channel that should receive the signal.
      *  @param flag The flag of the signal.
      *  @param payload The content of the signal.
      *  @return False is something went wrong.
      */
-	private boolean processSignalPacket(Stream stream, int flag, ByteBuffer payload) {
-		StreamSignal signal;
+	private boolean processSignalPacket(Channel channel, int flag, ByteBuffer payload) {
+		ChannelSignal signal;
 
         if (flag > 0) {
             String m = "";
@@ -731,21 +730,21 @@ public class ExtSocket implements Runnable {
 					m = decoder.decode(payload).toString();
 				} catch (CharacterCodingException e) {}
             }
-            StreamError error = new StreamError("", 0x0);
+            ChannelError error = new ChannelError("", 0x0);
             
             if (flag != Packet.SIG_END) {
-                error = StreamError.fromSigError(flag, m);
+                error = ChannelError.fromSigError(flag, m);
             }
 
-            stream.destroy(error);
+            channel.destroy(error);
             return false;
         }
 
-        if (stream == null)
+        if (channel == null)
             return false;
 
-        signal = new StreamSignal(flag, payload);
-        stream.addSignal(signal);
+        signal = new ChannelSignal(flag, payload);
+        channel.addSignal(signal);
         return true;
 	}
 	
@@ -758,7 +757,7 @@ public class ExtSocket implements Runnable {
      */
 	private void processSignalPacket(int ch, int flag, ByteBuffer payload) {
 		if (ch == 0) {
-            m_openStreamsMutex.lock();
+            m_openChannelsMutex.lock();
             boolean destroying = false;
             int size = payload.capacity();
 
@@ -770,15 +769,15 @@ public class ExtSocket implements Runnable {
                 m_closingMutex.unlock();
             }
             
-            Iterator<Stream> it = m_openStreams.values().iterator();
+            Iterator<Channel> it = m_openChannels.values().iterator();
             while (it.hasNext()) {
-            	Stream stream = it.next();
+            	Channel channel = it.next();
             	ByteBuffer payloadCopy = ByteBuffer.allocate(size);
             	payloadCopy.put(payload);
             	payloadCopy.flip();
             	payload.rewind();
 
-                if (!destroying && stream == null) {
+                if (!destroying && channel == null) {
                     destroying = true;
 
                     m_closingMutex.lock();
@@ -786,12 +785,12 @@ public class ExtSocket implements Runnable {
                     m_closingMutex.unlock();
                 }
 
-                if (!processSignalPacket(stream, flag, payloadCopy)) {
+                if (!processSignalPacket(channel, flag, payloadCopy)) {
                     it.remove();
                 }
             }
 
-            m_openStreamsMutex.unlock();
+            m_openChannelsMutex.unlock();
 
             if (destroying) {
                 m_closingMutex.lock();
@@ -801,20 +800,20 @@ public class ExtSocket implements Runnable {
                 checkRefCount();
             }
         } else {
-            m_openStreamsMutex.lock();
-            Stream stream = null;
+            m_openChannelsMutex.lock();
+            Channel channel = null;
 
-            if (m_openStreams.containsKey(ch))
-                stream = m_openStreams.get(ch);
+            if (m_openChannels.containsKey(ch))
+                channel = m_openChannels.get(ch);
 
-            if (stream == null) {
-                m_openStreamsMutex.unlock();
-                destroy(new StreamError("Received unknown channel"));
+            if (channel == null) {
+                m_openChannelsMutex.unlock();
+                destroy(new ChannelError("Received unknown channel"));
                 return;
             }
             
-            if (flag > 0x0 && !stream.isClosing()) {
-            	m_openStreamsMutex.unlock();
+            if (flag > 0x0 && !channel.isClosing()) {
+            	m_openChannelsMutex.unlock();
             	
             	Packet packet = new Packet(ch, Packet.SIGNAL, Packet.SIG_END, payload);
 				writeBytes(packet);
@@ -822,8 +821,8 @@ public class ExtSocket implements Runnable {
 				return;
 			}
 
-            processSignalPacket(stream, flag, payload);
-            m_openStreamsMutex.unlock();
+            processSignalPacket(channel, flag, payload);
+            m_openChannelsMutex.unlock();
         }
 	}
 	
@@ -832,7 +831,7 @@ public class ExtSocket implements Runnable {
      *
      *  @error The cause of the destroy.
      */
-	private void destroy(StreamError error) {
+	private void destroy(ChannelError error) {
 		m_destroyingMutex.lock();
         m_destroying = true;
         m_destroyingMutex.unlock();
@@ -848,9 +847,9 @@ public class ExtSocket implements Runnable {
         
         for (OpenRequest request : m_pendingOpenRequests.values()) {
         	if (HydnaDebug.HYDNADEBUG) {
-            	DebugHelper.debugPrint("ExtSocket", request.getChannel(), "Destroying stream");
+            	DebugHelper.debugPrint("ExtSocket", request.getChannelId(), "Destroying channel");
             }
-			request.getStream().destroy(error);
+			request.getChannel().destroy(error);
 		}
         m_pendingOpenRequests.clear();
         m_pendingMutex.unlock();
@@ -861,24 +860,24 @@ public class ExtSocket implements Runnable {
         }
         for (Queue<OpenRequest> queue : m_openWaitQueue.values()) {
             while(queue != null && !queue.isEmpty()) {
-                queue.poll().getStream().destroy(error);
+                queue.poll().getChannel().destroy(error);
             }
         }
         m_openWaitQueue.clear();
         m_openWaitMutex.unlock();
         
-        m_openStreamsMutex.lock();
+        m_openChannelsMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying openStreams of size " + m_openStreams.size());
+        	DebugHelper.debugPrint("ExtSocket", 0, "Destroying openChannels of size " + m_openChannels.size());
         }
-        for (Stream stream : m_openStreams.values()) {
+        for (Channel channel : m_openChannels.values()) {
         	if (HydnaDebug.HYDNADEBUG) {
-        		DebugHelper.debugPrint("ExtSocket", stream.getChannel(), "Destroying stream");
+        		DebugHelper.debugPrint("ExtSocket", channel.getChannel(), "Destroying channel");
         	}
-            stream.destroy(error);
+            channel.destroy(error);
         }				
-        m_openStreams.clear();
-        m_openStreamsMutex.unlock();
+        m_openChannels.clear();
+        m_openChannelsMutex.unlock();
 
         if (m_connected) {
         	if (HydnaDebug.HYDNADEBUG) {
@@ -936,7 +935,7 @@ public class ExtSocket implements Runnable {
             }
 
             if (n <= 0) {
-                destroy(new StreamError("Could not write to the socket"));
+                destroy(new ChannelError("Could not write to the socket"));
                 return false;
             }
             return true;

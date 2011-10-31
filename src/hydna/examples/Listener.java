@@ -5,27 +5,27 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 
-import hydna.Stream;
-import hydna.StreamData;
-import hydna.StreamError;
-import hydna.StreamMode;
+import hydna.Channel;
+import hydna.ChannelData;
+import hydna.ChannelError;
+import hydna.ChannelMode;
 
 /**
  *  Listener example
  */
 public class Listener {
-	public static void main(String[] args) throws CharacterCodingException, StreamError, InterruptedException {
-		Stream stream = new Stream();
-	    stream.connect("localhost/x11221133", StreamMode.READWRITE);
+	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
+		Channel channel = new Channel();
+	    channel.connect("localhost/x11221133", ChannelMode.READWRITE);
 
-	    while(!stream.isConnected()) {
-	        stream.checkForStreamError();
+	    while(!channel.isConnected()) {
+	        channel.checkForChannelError();
 	        Thread.sleep(1000);
 	    }
 
 	    for (;;) {
-	        if (!stream.isDataEmpty()) {
-	            StreamData data = stream.popData();
+	        if (!channel.isDataEmpty()) {
+	            ChannelData data = channel.popData();
 	            ByteBuffer payload = data.getContent();
 
 	            Charset charset = Charset.forName("US-ASCII");
@@ -35,7 +35,7 @@ public class Listener {
 				
             	System.out.println(m);
 	        } else {
-	            stream.checkForStreamError();
+	            channel.checkForChannelError();
 	        }
 	    }
 	}
