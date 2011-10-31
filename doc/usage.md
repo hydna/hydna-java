@@ -1,6 +1,6 @@
 # Usage
 
-In the following example we open a read/write stream, send a "Hello world!"
+In the following example we open a read/write channel, send a "Hello world!"
 when the connection has been established and print all received messages to
 the console.
 
@@ -11,31 +11,31 @@ the console.
     import java.nio.charset.Charset;
     import java.nio.charset.CharsetDecoder;
 
-    import hydna.Stream;
-    import hydna.StreamData;
-    import hydna.StreamError;
-    import hydna.StreamMode;
+    import hydna.Channel;
+    import hydna.ChannelData;
+    import hydna.ChannelError;
+    import hydna.ChannelMode;
 
     /**
     * Hello world example
     */
     public class HelloWorld {
         public static void main(String[] args) throws
-                CharacterCodingException, StreamError,
+                CharacterCodingException, ChannelError,
                 InterruptedException {
-            Stream stream = new Stream();
-            stream.connect("localhost/x11221133", StreamMode.READWRITE);
+            Channel channel = new Channel();
+            channel.connect("localhost/x11221133", ChannelMode.READWRITE);
 
-            while(!stream.isConnected()) {
-                stream.checkForStreamError();
+            while(!channel.isConnected()) {
+                channel.checkForChannelError();
                 Thread.sleep(1000);
             }
 
-            stream.writeString("Hello World");
+            channel.writeString("Hello World");
 
             for (;;) {
-                if (!stream.isDataEmpty()) {
-                    StreamData data = stream.popData();
+                if (!channel.isDataEmpty()) {
+                    ChannelData data = channnel.popData();
                     ByteBuffer payload = data.getContent();
 
                     Charset charset = Charset.forName("US-ASCII");
@@ -45,9 +45,9 @@ the console.
                                 
                     break;
                 } else {
-                    stream.checkForStreamError();
+                    channel.checkForChannelError();
                 }
             }
-            stream.close();
+            channel.close();
         }
     }
