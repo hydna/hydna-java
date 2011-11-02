@@ -1,8 +1,9 @@
 package hydna;
 
-import java.io.DataInputStream;
+import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
@@ -27,8 +28,6 @@ import java.util.concurrent.locks.ReentrantLock;
  *  A user of the library should not create an instance of this class.
  */
 public class ExtSocket implements Runnable {
-	private static final int HANDSHAKE_RESP_SIZE = 5;
-	
 	private static Map<String, ExtSocket> m_availableSockets = new HashMap<String, ExtSocket>();
 	private static Lock m_socketMutex = new ReentrantLock();
 	
@@ -49,11 +48,12 @@ public class ExtSocket implements Runnable {
 	
 	private String m_host;
 	private short m_port;
+	private String m_auth = "";
 	
 	private SocketChannel m_socketChannel;
 	private Socket m_socket;
 	private DataOutputStream m_outStream;
-	private DataInputStream m_inStream;
+	private BufferedReader m_inStreamReader;
 	
 	private Map<Integer, OpenRequest> m_pendingOpenRequests = new HashMap<Integer, OpenRequest>();
 	private Map<Integer, Channel> m_openChannels = new HashMap<Integer, Channel>();
@@ -70,16 +70,16 @@ public class ExtSocket implements Runnable {
      *  @param port The port associated with the socket.
      *  @return The socket.
      */
-	public static ExtSocket getSocket(String host, short port) {
+	public static ExtSocket getSocket(String host, short port, String auth) {
 		ExtSocket socket;
         String ports = Short.toString(port);
-        String key = host + ports;
+        String key = host + ports + auth;
       
         m_socketMutex.lock();
         if (m_availableSockets.containsKey(key)) {
             socket = m_availableSockets.get(key);
         } else {
-            socket = new ExtSocket(host, port);
+            socket = new ExtSocket(host, port, auth);
             m_availableSockets.put(key, socket);
         }
         m_socketMutex.unlock();
@@ -93,9 +93,10 @@ public class ExtSocket implements Runnable {
      *  @param host The host the socket should connect to.
      *  @param port The port the socket should connect to.
      */
-	public ExtSocket(String host, short port) {
+	public ExtSocket(String host, short port, String auth) {
 		m_host = host;
 		m_port = port;
+		m_auth = auth;
 	}
 	
 	/**
@@ -236,7 +237,7 @@ public class ExtSocket implements Runnable {
             
             if (!m_connecting) {
                 m_connecting = true;
-                connectSocket(m_host, m_port);
+                connectSocket(m_host, m_port, m_auth);
             }
         } else {
         	m_pendingOpenRequests.put(chcomp, request);
@@ -318,7 +319,7 @@ public class ExtSocket implements Runnable {
      *  @param packet The packet to be sent.
      *  @return True if the packet was sent.
      */
-	private void connectSocket(String host, int port) {
+	private void connectSocket(String host, int port, String auth) {
         if (HydnaDebug.HYDNADEBUG) {
         	DebugHelper.debugPrint("ExtSocket", 0, "Connecting socket");
         }
@@ -335,11 +336,15 @@ public class ExtSocket implements Runnable {
             }
         	
         	m_outStream = new DataOutputStream(m_socket.getOutputStream());
-        	m_inStream = new DataInputStream(m_socket.getInputStream());
+        	m_inStreamReader = new BufferedReader(new InputStreamReader(m_socket.getInputStream()));
+        	
+        	if (HydnaDebug.HYDNADEBUG) {
+            	DebugHelper.debugPrint("ExtSocket", 0, "Socket connected, sending HTTP upgrade request");
+            }
         	
         	m_connected = true;
         	
-        	connectHandler();
+        	connectHandler(auth);
         } catch (UnresolvedAddressException e) {
         	destroy(new ChannelError("The host \"" + host + "\" could not be resolved"));
         } catch (IOException e) {
@@ -348,30 +353,30 @@ public class ExtSocket implements Runnable {
 	}
 	
 	/**
-     *  Send a handshake packet.
+     *  Send HTTP upgrade request.
      */
-	private void connectHandler() {
-		if (HydnaDebug.HYDNADEBUG) {
-			DebugHelper.debugPrint("ExtSocket", 0, "Socket connected, sending handshake");
-		}
-		
-        int length = m_host.length();
+	private void connectHandler(String auth) {
         boolean success = false;
 
-        if (length < 256) {
-        	try {
-	            m_outStream.writeBytes("DNA1");
-	            m_outStream.writeByte(length);
-	            m_outStream.writeBytes(m_host);
-	            
-	            success = true;
-        	} catch (IOException e) {
-        		success = false;
-        	}
-        }
+    	try {
+            m_outStream.writeBytes("GET /" + auth + " HTTP/1.1\n" +
+            					   "Connection: upgrade\n" +
+            					   "Upgrade: winksock/1\n" +
+            					   "Host: " + m_host);
+            
+            // Redirects are not supported yet
+            if (true) {
+            	m_outStream.writeBytes("\nX-Follow-Redirects: no");
+            }
+            
+            m_outStream.writeBytes("\n\n");
+            success = true;
+    	} catch (IOException e) {
+    		success = false;
+    	}
 
         if (!success) {
-            destroy(new ChannelError("Could not send handshake"));
+            destroy(new ChannelError("Could not send upgrade request"));
         } else {
             handshakeHandler();
         }
@@ -381,37 +386,74 @@ public class ExtSocket implements Runnable {
      *  Handle the Handshake response packet.
      */
 	private void handshakeHandler() {
-		int responseCode = 0;
-        int n = -1;
-        byte data[] = new byte[HANDSHAKE_RESP_SIZE];
-        String prefix = "DNA1";
-
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("ExtSocket", 0, "Incoming handshake response on socket");
+        	DebugHelper.debugPrint("ExtSocket", 0, "Incoming upgrade response");
         }
         
-        try {
-        	n = m_inStream.read(data, 0, HANDSHAKE_RESP_SIZE);
-        } catch (IOException e) {
-        	n = -1;
-        }
-
-        if (n != HANDSHAKE_RESP_SIZE) {
-            destroy(new ChannelError("Server responded with bad handshake"));
-            return;
-        }
-
-        responseCode = data[HANDSHAKE_RESP_SIZE - 1];
-        data[HANDSHAKE_RESP_SIZE - 1] = '\0';
+        boolean fieldsLeft = true;
+        boolean gotResponse = false;
         
-        if (!prefix.equals(new String(data, 0, HANDSHAKE_RESP_SIZE - 1, Charset.forName("US-ASCII")))) {
-            destroy(new ChannelError("Server responded with bad handshake"));
-            return;
-        }
-
-        if (responseCode > 0) {
-            destroy(ChannelError.fromHandshakeError(responseCode));
-            return;
+        while (fieldsLeft) {
+        	String line;
+        	
+        	try {
+        		line = m_inStreamReader.readLine();
+        		if (line.length() == 0) {
+        			fieldsLeft = false;
+        		}
+            } catch (IOException e) {
+            	destroy(new ChannelError("Server responded with bad handshake"));
+                return;
+            }
+        	
+        	if (fieldsLeft) {
+        		// First line i a response, all others are fields
+        		if (!gotResponse) {
+        			int code = 0;
+        			int pos1, pos2;
+        			
+        			// Take the response code from "HTTP/1.1 101 Switching Protocols"
+        			pos1 = line.indexOf(" ");
+        			if (pos1 != -1) {
+        				pos2 = line.indexOf(" ", pos1 + 1);
+        				
+        				if (pos2 != -1) {
+        					try {
+        		            	code = Integer.parseInt(line.substring(pos1 + 1, pos2));
+        		            } catch (NumberFormatException e) {
+        		            	destroy(new ChannelError("Could not read the status from the response \"" + line + "\""));
+        		            }
+        				}
+        			}
+        			
+        			switch (code) {
+        			case 101:
+        				// Everything is ok, continue.
+        				break;
+        			case 301:
+        			case 302:
+        			case 307:
+        				destroy(new ChannelError("Could not read the status from the response \"" + line + "\""));
+        				return;
+        			default:
+        				destroy(new ChannelError("Server responded with bad HTTP response code, " + code));
+        			}
+        			
+        			gotResponse = true;
+        		} else {
+        			line = line.toLowerCase();
+        			int pos;
+        			
+        			pos = line.indexOf("upgrade: ");
+        			if (pos != -1) {
+        				String header = line.substring(9);
+        				if (!header.equals("winksock/1")) {
+        					destroy(new ChannelError("Bad protocol version: " + header));
+        					return;
+        				}
+        			}
+        		}
+        	}
         }
 
         m_handshaked = true;
@@ -439,8 +481,8 @@ public class ExtSocket implements Runnable {
         }
 
         try {
-        m_listeningThread = new Thread(this);
-        m_listeningThread.start();
+        	m_listeningThread = new Thread(this);
+        	m_listeningThread.start();
         } catch (IllegalThreadStateException e) {
             destroy(new ChannelError("Could not create a new thread for packet listening"));
             return;
@@ -525,11 +567,10 @@ public class ExtSocket implements Runnable {
 
             payload.flip();
             
-            header.get(); // Reserved
             ch = header.getInt();
             byte of = header.get();
-            op   = of >> 4;
-            flag = of & 0xf;
+            op   = of >> 3 & 3;
+            flag = of & 7;
 
             switch (op) {
 
@@ -575,6 +616,7 @@ public class ExtSocket implements Runnable {
 		OpenRequest request;
         Channel channel;
         int respch = 0;
+        String message = "";
         
         m_pendingMutex.lock();
         request = m_pendingOpenRequests.get(ch);
@@ -587,8 +629,17 @@ public class ExtSocket implements Runnable {
 
         channel = request.getChannel();
 
-        if (errcode == Packet.OPEN_SUCCESS) {
+        if (errcode == Packet.OPEN_ALLOW) {
             respch = ch;
+            
+            if (payload != null) {
+            	Charset charset = Charset.forName("US-ASCII");
+            	CharsetDecoder decoder = charset.newDecoder();
+            	
+                try {
+					message = decoder.decode(payload).toString();
+				} catch (CharacterCodingException e) {}
+            }
         } else if (errcode == Packet.OPEN_REDIRECT) {
             if (payload == null || payload.capacity() < 4) {
                 destroy(new ChannelError("Expected redirect channel from the server"));
@@ -600,6 +651,16 @@ public class ExtSocket implements Runnable {
             if (HydnaDebug.HYDNADEBUG) {
             	DebugHelper.debugPrint("ExtSocket",     ch, "Redirected from " + ch);
             	DebugHelper.debugPrint("ExtSocket", respch, "             to " + respch);
+            }
+            
+            if (payload != null && payload.capacity() > 4) {
+            	Charset charset = Charset.forName("US-ASCII");
+            	CharsetDecoder decoder = charset.newDecoder();
+            	
+                try {
+                	payload.position(4);
+					message = decoder.decode(payload).toString();
+				} catch (CharacterCodingException e) {}
             }
         } else {
             m_pendingMutex.lock();
@@ -638,7 +699,7 @@ public class ExtSocket implements Runnable {
         }
         m_openChannelsMutex.unlock();
 
-        channel.openSuccess(respch);
+        channel.openSuccess(respch, message);
 
         m_openWaitMutex.lock();
         m_pendingMutex.lock();
@@ -720,7 +781,7 @@ public class ExtSocket implements Runnable {
 	private boolean processSignalPacket(Channel channel, int flag, ByteBuffer payload) {
 		ChannelSignal signal;
 
-        if (flag > 0) {
+        if (flag != Packet.SIG_EMIT) {
             String m = "";
             if (payload != null && payload.capacity() > 0) {
             	Charset charset = Charset.forName("US-ASCII");
@@ -761,7 +822,7 @@ public class ExtSocket implements Runnable {
             boolean destroying = false;
             int size = payload.capacity();
 
-            if (flag > 0x0 || payload == null || size == 0) {
+            if (flag != Packet.SIG_EMIT || payload == null || size == 0) {
                 destroying = true;
 
                 m_closingMutex.lock();
@@ -812,7 +873,7 @@ public class ExtSocket implements Runnable {
                 return;
             }
             
-            if (flag > 0x0 && !channel.isClosing()) {
+            if (flag != Packet.SIG_EMIT && !channel.isClosing()) {
             	m_openChannelsMutex.unlock();
             	
             	Packet packet = new Packet(ch, Packet.SIGNAL, Packet.SIG_END, payload);
@@ -895,7 +956,7 @@ public class ExtSocket implements Runnable {
             m_handshaked = false;
         }
         String ports = Short.toString(m_port);
-        String key = m_host + ports;
+        String key = m_host + ports + m_auth;
 
         m_socketMutex.lock();
         if (m_availableSockets.containsKey(key)) {

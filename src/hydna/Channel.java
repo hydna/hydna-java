@@ -12,9 +12,11 @@ import java.util.concurrent.locks.ReentrantLock;
  *  to communicate with a server.
  */
 public class Channel {
-	private String m_host ="";
-	private short m_port = 7010;
+	private String m_host = "";
+	private short m_port = 80;
 	private int m_ch = 0;
+	private String m_auth = "";
+	private String m_message = "";
 	
 	private ExtSocket m_socket = null;
 	private boolean m_connected = false;
@@ -115,6 +117,18 @@ public class Channel {
 	}
 	
 	/**
+     *  Returns the message received when connected.
+     *
+     *  @return The welcome message.
+     */
+	public String getMessage() {
+		m_connectMutex.lock();
+        String result = m_message;
+        m_connectMutex.unlock();
+        return result;
+	}
+	
+	/**
      *  Resets the error.
      *  
      *  Connects the channel to the specified channel. If the connection fails 
@@ -161,17 +175,45 @@ public class Channel {
         m_emitable = ((m_mode & ChannelMode.EMIT) == ChannelMode.EMIT);
 
         String host = expr;
-        short port = 7010;
+        short port = 80;
         int ch = 1;
         String tokens = "";
+        String auth = "";
         int pos;
         
+        // Host can be on the form "http://auth@localhost:80/x00112233?token"
+        
+        // Take out the protocol
+        pos = host.indexOf("://");
+        if (pos != -1) {
+        	String protocol = host.substring(0, pos);
+        	protocol = protocol.toLowerCase();
+        	host = host.substring(pos + 3);
+        	
+        	if (!protocol.equals("http")) {
+        		if (protocol.equals("https")) {
+        			throw new Error("The protocol HTTPS is not supported");
+        		} else {
+        			throw new Error("Unknown protocol, " + protocol);
+        		}
+        	}
+        }
+        
+        // Take out the auth
+        pos = host.indexOf("@");
+        if (pos != -1) {
+            auth = host.substring(0, pos);
+            host = host.substring(pos + 1);
+        }
+        
+        // Take out the token
         pos = host.lastIndexOf("?");
         if (pos != -1) {
             tokens = host.substring(pos + 1);
             host = host.substring(0, pos);
         }
 
+        // Take out the channel
         pos = host.lastIndexOf("/x");
         if (pos != -1) {
             try {
@@ -194,6 +236,7 @@ public class Channel {
             }
         }
 
+        // Take out the port
         pos = host.lastIndexOf(":");
         if (pos != -1) {
         	try {
@@ -208,8 +251,9 @@ public class Channel {
         m_host = host;
         m_port = port;
         m_ch = ch;
+        m_auth = auth;
 
-        m_socket = ExtSocket.getSocket(m_host, m_port);
+        m_socket = ExtSocket.getSocket(m_host, m_port, m_auth);
       
         // Ref count
         m_socket.allocChannel();
@@ -293,7 +337,7 @@ public class Channel {
      *  @param data The data to write to the channel.
      *  @param type The type of the signal.
      */
-	public void emitBytes(ByteBuffer data, int type) throws ChannelError {
+	public void emitBytes(ByteBuffer data) throws ChannelError {
 		boolean result;
 
         m_connectMutex.lock();
@@ -308,7 +352,7 @@ public class Channel {
             throw new ChannelError("You do not have permission to send signals");
         }
 
-        Packet packet = new Packet(m_ch, Packet.SIGNAL, type,
+        Packet packet = new Packet(m_ch, Packet.SIGNAL, Packet.SIG_EMIT,
                             data);
 
         m_connectMutex.lock();
@@ -321,31 +365,13 @@ public class Channel {
 	}
 	
 	/**
-     *  Sends data signal to the channel.
-     *
-     *  @param data The data to write to the channel.
-     */
-	public void emitBytes(ByteBuffer data) throws ChannelError {
-		emitBytes(data, 0);
-	}
-	
-	/**
      *  Sends a string signal to the channel.
      *
      *  @param value The string to be sent.
      *  @param type The type of the signal.
      */
-	public void emitString(String value, int type) throws ChannelError {
-		emitBytes(ByteBuffer.wrap(value.getBytes()), type);
-	}
-	
-	/**
-     *  Sends a string signal to the channel.
-     *
-     *  @param value The string to be sent.
-     */
 	public void emitString(String value) throws ChannelError {
-		emitString(value, 0);
+		emitBytes(ByteBuffer.wrap(value.getBytes()));
 	}
 	
 	/**
@@ -494,7 +520,7 @@ public class Channel {
      *
      *  @param respch The response channel.
      */
-	protected void openSuccess(int respch) {
+	protected void openSuccess(int respch, String message) {
 		m_connectMutex.lock();
 		int origch = m_ch;
 		Packet packet;
@@ -502,6 +528,7 @@ public class Channel {
 		m_openRequest = null;
         m_ch = respch;
         m_connected = true;
+        m_message = message;
       
         if (m_pendingClose != null) {
         	packet = m_pendingClose;
