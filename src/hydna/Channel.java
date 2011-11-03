@@ -18,7 +18,7 @@ public class Channel {
 	private String m_auth = "";
 	private String m_message = "";
 	
-	private ExtSocket m_socket = null;
+	private Connection m_connection = null;
 	private boolean m_connected = false;
 	private boolean m_closing = false;
 	private Packet m_pendingClose;
@@ -156,7 +156,7 @@ public class Channel {
         OpenRequest request;
       
         m_connectMutex.lock();
-        if (m_socket != null) {
+        if (m_connection != null) {
             m_connectMutex.unlock();
             throw new ChannelError("Already connected");
         }
@@ -253,10 +253,10 @@ public class Channel {
         m_ch = ch;
         m_auth = auth;
 
-        m_socket = ExtSocket.getSocket(m_host, m_port, m_auth);
+        m_connection = Connection.getConnection(m_host, m_port, m_auth);
       
         // Ref count
-        m_socket.allocChannel();
+        m_connection.allocChannel();
 
         if (token != null || tokens == "") {
             packet = new Packet(m_ch, Packet.OPEN, mode, token);
@@ -268,7 +268,7 @@ public class Channel {
 
         m_error = new ChannelError("", 0x0);
       
-        if (!m_socket.requestOpen(request)) {
+        if (!m_connection.requestOpen(request)) {
             checkForChannelError();
             throw new ChannelError("Channel already open");
         }
@@ -286,7 +286,7 @@ public class Channel {
 		boolean result;
 
         m_connectMutex.lock();
-        if (!m_connected || m_socket == null) {
+        if (!m_connected || m_connection == null) {
             m_connectMutex.unlock();
             checkForChannelError();
             throw new ChannelError("Channel is not connected");
@@ -305,9 +305,9 @@ public class Channel {
                                 data);
       
         m_connectMutex.lock();
-        ExtSocket socket = m_socket;
+        Connection connection = m_connection;
         m_connectMutex.unlock();
-        result = socket.writeBytes(packet);
+        result = connection.writeBytes(packet);
 
         if (!result)
             checkForChannelError();
@@ -341,7 +341,7 @@ public class Channel {
 		boolean result;
 
         m_connectMutex.lock();
-        if (!m_connected || m_socket == null) {
+        if (!m_connected || m_connection == null) {
             m_connectMutex.unlock();
             checkForChannelError();
             throw new ChannelError("Channel is not connected.");
@@ -356,9 +356,9 @@ public class Channel {
                             data);
 
         m_connectMutex.lock();
-        ExtSocket socket = m_socket;
+        Connection connection = m_connection;
         m_connectMutex.unlock();
-        result = socket.writeBytes(packet);
+        result = connection.writeBytes(packet);
 
         if (!result)
             checkForChannelError();
@@ -379,7 +379,7 @@ public class Channel {
      */
 	public void close() {
 		m_connectMutex.lock();
-        if (m_socket == null || m_closing) {
+        if (m_connection == null || m_closing) {
             m_connectMutex.unlock();
             return;
         }
@@ -389,7 +389,7 @@ public class Channel {
         m_writable = false;
         m_emitable = false;
       
-        if (m_openRequest != null && m_socket.cancelOpen(m_openRequest)) {
+        if (m_openRequest != null && m_connection.cancelOpen(m_openRequest)) {
         	// Open request hasn't been posted yet, which means that it's
             // safe to destroy channel immediately.
         	
@@ -417,9 +417,9 @@ public class Channel {
 			}
         	
         	m_connectMutex.lock();
-        	ExtSocket socket = m_socket;
+        	Connection connection = m_connection;
         	m_connectMutex.unlock();
-        	socket.writeBytes(packet);
+        	connection.writeBytes(packet);
         	
         }
 	}
@@ -516,7 +516,7 @@ public class Channel {
 	
 	/**
      *  Internal callback for open success.
-     *  Used by the ExtSocket class.
+     *  Used by the Connection class.
      *
      *  @param respch The response channel.
      */
@@ -547,22 +547,22 @@ public class Channel {
 			}
             
 			m_connectMutex.lock();
-			ExtSocket socket = m_socket;
+			Connection connection = m_connection;
 			m_connectMutex.unlock();
-			socket.writeBytes(packet);
+			connection.writeBytes(packet);
         } else {
             m_connectMutex.unlock();
         }
 	}
 	
 	/**
-     *  Internally destroy socket.
+     *  Internally destroy connection.
      *
      *  @param error The cause of the destroy.
      */
 	protected void destroy(ChannelError error) {
 		m_connectMutex.lock();
-		ExtSocket socket = m_socket;
+		Connection connection = m_connection;
 		boolean connected = m_connected;
 		int ch = m_ch;
 
@@ -573,10 +573,10 @@ public class Channel {
         m_pendingClose = null;
         m_closing = false;
         m_openRequest = null;
-        m_socket = null;
+        m_connection = null;
       
-        if (socket != null) {
-            socket.deallocChannel(connected ? ch : 0);
+        if (connection != null) {
+            connection.deallocChannel(connected ? ch : 0);
         }
         
         m_error = error;

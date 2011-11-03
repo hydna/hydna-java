@@ -1,7 +1,7 @@
 package hydna;
 
 /**
- *  This class is used internally by both the Channel and the ExtSocket class.
+ *  This class is used internally by both the Channel and the Connection class.
  *  A user of the library should not create an instance of this class.
  */
 public class OpenRequest {
