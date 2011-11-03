@@ -3,7 +3,7 @@ package hydna;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-public class Packet {
+public class Frame {
 	public static final short HEADER_SIZE = 0x07;
 	
 	// Opcodes
@@ -27,7 +27,7 @@ public class Packet {
 	
 	private ByteBuffer m_bytes;
 	
-	public Packet(int ch, int op, int flag, ByteBuffer payload) {
+	public Frame(int ch, int op, int flag, ByteBuffer payload) {
 		super();
 		
 		short length = HEADER_SIZE;
@@ -54,7 +54,7 @@ public class Packet {
 		m_bytes.flip();
 	}
 	
-	public Packet(int ch, int op, int flag) {
+	public Frame(int ch, int op, int flag) {
 		this(ch, op, flag, null);
 	}
 	

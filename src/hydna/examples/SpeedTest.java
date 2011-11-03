@@ -43,7 +43,7 @@ public class SpeedTest {
 
 	                    if (i == NO_BROADCASTS) {
 	                        time = System.nanoTime() - time;
-	                        System.out.println("Received " + NO_BROADCASTS + " packets");
+	                        System.out.println("Received " + NO_BROADCASTS + " frames");
 	                        System.out.println("Time: " + time/1000000 + "ms");
 	                        i = 0;
 	                    }
@@ -52,7 +52,7 @@ public class SpeedTest {
 	                }
 	            }
 	        } else if (arg.equals("send")) {
-	            System.out.println("Sending " + NO_BROADCASTS + " packets to x11221133");
+	            System.out.println("Sending " + NO_BROADCASTS + " frames to x11221133");
 
 	            time = System.nanoTime();
 

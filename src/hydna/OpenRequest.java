@@ -7,13 +7,13 @@ package hydna;
 public class OpenRequest {
 	private Channel m_channel;
 	private int m_ch;
-	private Packet m_packet;
+	private Frame m_frame;
 	private boolean m_sent = false;
 	
-	public OpenRequest(Channel channel, int ch, Packet packet) {
+	public OpenRequest(Channel channel, int ch, Frame frame) {
 		m_channel = channel;
 		m_ch = ch;
-		m_packet = packet;
+		m_frame = frame;
 	}
 	
 	public Channel getChannel() {
@@ -24,8 +24,8 @@ public class OpenRequest {
 		return m_ch;
 	}
 	
-	public Packet getPacket() {
-		return m_packet;
+	public Frame getFrame() {
+		return m_frame;
 	}
 	
 	public boolean isSent() {

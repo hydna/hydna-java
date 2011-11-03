@@ -247,7 +247,7 @@ public class Connection implements Runnable {
             	DebugHelper.debugPrint("Connection", chcomp, "Already connected, sending the new open request");
             }
 
-            writeBytes(request.getPacket());
+            writeBytes(request.getFrame());
             request.setSent(true);
         }
       
@@ -314,10 +314,10 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Writes a packet to the connection.
+     *  Connect the connection.
      *
-     *  @param packet The packet to be sent.
-     *  @return True if the packet was sent.
+     *  @param host The host to connect to.
+     *  @param port The port to connect to.
      */
 	private void connectConnection(String host, int port, String auth) {
         if (HydnaDebug.HYDNADEBUG) {
@@ -383,7 +383,7 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Handle the Handshake response packet.
+     *  Handle the Handshake response frame.
      */
 	private void handshakeHandler() {
         if (HydnaDebug.HYDNADEBUG) {
@@ -464,7 +464,7 @@ public class Connection implements Runnable {
         }
 
         for (OpenRequest request : m_pendingOpenRequests.values()) {
-            writeBytes(request.getPacket());
+            writeBytes(request.getFrame());
 
             if (m_connected) {
                 request.setSent(true);
@@ -477,21 +477,21 @@ public class Connection implements Runnable {
         }
 
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("Connection", 0, "Creating a new thread for packet listening");
+        	DebugHelper.debugPrint("Connection", 0, "Creating a new thread for frame listening");
         }
 
         try {
         	m_listeningThread = new Thread(this);
         	m_listeningThread.start();
         } catch (IllegalThreadStateException e) {
-            destroy(new ChannelError("Could not create a new thread for packet listening"));
+            destroy(new ChannelError("Could not create a new thread for frame listening"));
             return;
         }
 	}
 	
 	/**
      * The method that is called in the new thread.
-     * Listens for incoming packets.
+     * Listens for incoming frames.
      */
 	public void run() {
 		receiveHandler();
@@ -502,7 +502,7 @@ public class Connection implements Runnable {
      */
 	public void receiveHandler() {
 		int size;
-        int headerSize = Packet.HEADER_SIZE;
+        int headerSize = Frame.HEADER_SIZE;
         int ch;
         int op;
         int flag;
@@ -574,25 +574,25 @@ public class Connection implements Runnable {
 
             switch (op) {
 
-                case Packet.OPEN:
+                case Frame.OPEN:
                 	if (HydnaDebug.HYDNADEBUG) {
                 		DebugHelper.debugPrint("Connection", ch, "Received open response");
                 	}
-                    processOpenPacket(ch, flag, payload);
+                    processOpenFrame(ch, flag, payload);
                     break;
 
-                case Packet.DATA:
+                case Frame.DATA:
                 	if (HydnaDebug.HYDNADEBUG) {
                 		DebugHelper.debugPrint("Connection", ch, "Received data");
                 	}
-                    processDataPacket(ch, flag, payload);
+                    processDataFrame(ch, flag, payload);
                     break;
 
-                case Packet.SIGNAL:
+                case Frame.SIGNAL:
                 	if (HydnaDebug.HYDNADEBUG) {
                 		DebugHelper.debugPrint("Connection", ch, "Received signal");
                 	}
-                    processSignalPacket(ch, flag, payload);
+                    processSignalFrame(ch, flag, payload);
                     break;
             }
 
@@ -606,13 +606,13 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Process an open packet.
+     *  Process an open frame.
      *
-     *  @param addr The address that should receive the open packet.
-     *  @param errcode The error code of the open packet.
-     *  @param payload The content of the open packet.
+     *  @param addr The address that should receive the open frame.
+     *  @param errcode The error code of the open frame.
+     *  @param payload The content of the open frame.
      */
-	private void processOpenPacket(int ch, int errcode, ByteBuffer payload) {
+	private void processOpenFrame(int ch, int errcode, ByteBuffer payload) {
 		OpenRequest request;
         Channel channel;
         int respch = 0;
@@ -623,13 +623,13 @@ public class Connection implements Runnable {
         m_pendingMutex.unlock();
 
         if (request == null) {
-            destroy(new ChannelError("The server sent a invalid open packet"));
+            destroy(new ChannelError("The server sent a invalid open frame"));
             return;
         }
 
         channel = request.getChannel();
 
-        if (errcode == Packet.OPEN_ALLOW) {
+        if (errcode == Frame.OPEN_ALLOW) {
             respch = ch;
             
             if (payload != null) {
@@ -640,7 +640,7 @@ public class Connection implements Runnable {
 					message = decoder.decode(payload).toString();
 				} catch (CharacterCodingException e) {}
             }
-        } else if (errcode == Packet.OPEN_REDIRECT) {
+        } else if (errcode == Frame.OPEN_REDIRECT) {
             if (payload == null || payload.capacity() < 4) {
                 destroy(new ChannelError("Expected redirect channel from the server"));
                 return;
@@ -730,7 +730,7 @@ public class Connection implements Runnable {
                     m_openWaitQueue.remove(ch);
                 }
 
-                writeBytes(request.getPacket());
+                writeBytes(request.getFrame());
                 request.setSent(true);
             }
         } else {
@@ -741,13 +741,13 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Process a data packet.
+     *  Process a data frame.
      *
      *  @param addr The address that should receive the data.
      *  @param priority The priority of the data.
      *  @param payload The content of the data.
      */
-	private void processDataPacket(int ch, int priority, ByteBuffer payload) {
+	private void processDataFrame(int ch, int priority, ByteBuffer payload) {
 		Channel channel = null;
         ChannelData data;
         
@@ -762,7 +762,7 @@ public class Connection implements Runnable {
         }
 
         if (payload == null || payload.capacity() == 0) {
-            destroy(new ChannelError("Zero data packet received"));
+            destroy(new ChannelError("Zero data frame received"));
             return;
         }
 
@@ -771,17 +771,17 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Process a signal packet.
+     *  Process a signal frame.
      *
      *  @param channel The channel that should receive the signal.
      *  @param flag The flag of the signal.
      *  @param payload The content of the signal.
      *  @return False is something went wrong.
      */
-	private boolean processSignalPacket(Channel channel, int flag, ByteBuffer payload) {
+	private boolean processSignalFrame(Channel channel, int flag, ByteBuffer payload) {
 		ChannelSignal signal;
 
-        if (flag != Packet.SIG_EMIT) {
+        if (flag != Frame.SIG_EMIT) {
             String m = "";
             if (payload != null && payload.capacity() > 0) {
             	Charset charset = Charset.forName("US-ASCII");
@@ -793,7 +793,7 @@ public class Connection implements Runnable {
             }
             ChannelError error = new ChannelError("", 0x0);
             
-            if (flag != Packet.SIG_END) {
+            if (flag != Frame.SIG_END) {
                 error = ChannelError.fromSigError(flag, m);
             }
 
@@ -810,19 +810,19 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Process a signal packet.
+     *  Process a signal frame.
      *
      *  @param addr The address that should receive the signal.
      *  @param flag The flag of the signal.
      *  @param payload The content of the signal.
      */
-	private void processSignalPacket(int ch, int flag, ByteBuffer payload) {
+	private void processSignalFrame(int ch, int flag, ByteBuffer payload) {
 		if (ch == 0) {
             m_openChannelsMutex.lock();
             boolean destroying = false;
             int size = payload.capacity();
 
-            if (flag != Packet.SIG_EMIT || payload == null || size == 0) {
+            if (flag != Frame.SIG_EMIT || payload == null || size == 0) {
                 destroying = true;
 
                 m_closingMutex.lock();
@@ -846,7 +846,7 @@ public class Connection implements Runnable {
                     m_closingMutex.unlock();
                 }
 
-                if (!processSignalPacket(channel, flag, payloadCopy)) {
+                if (!processSignalFrame(channel, flag, payloadCopy)) {
                     it.remove();
                 }
             }
@@ -873,16 +873,16 @@ public class Connection implements Runnable {
                 return;
             }
             
-            if (flag != Packet.SIG_EMIT && !channel.isClosing()) {
+            if (flag != Frame.SIG_EMIT && !channel.isClosing()) {
             	m_openChannelsMutex.unlock();
             	
-            	Packet packet = new Packet(ch, Packet.SIGNAL, Packet.SIG_END, payload);
-				writeBytes(packet);
+            	Frame frame = new Frame(ch, Frame.SIGNAL, Frame.SIG_END, payload);
+				writeBytes(frame);
 				
 				return;
 			}
 
-            processSignalPacket(channel, flag, payload);
+            processSignalFrame(channel, flag, payload);
             m_openChannelsMutex.unlock();
         }
 	}
@@ -974,15 +974,15 @@ public class Connection implements Runnable {
 	}
 	
 	/**
-     *  Writes a packet to the connection.
+     *  Writes a frame to the connection.
      *
-     *  @param packet The packet to be sent.
-     *  @return True if the packet was sent.
+     *  @param frame The frame to be sent.
+     *  @return True if the frame was sent.
      */
-	public boolean writeBytes(Packet packet) {
+	public boolean writeBytes(Frame frame) {
 		if (m_handshaked) {
             int n = -1;
-            ByteBuffer data = packet.getData();
+            ByteBuffer data = frame.getData();
             int size = data.capacity();
             int offset = 0;
 

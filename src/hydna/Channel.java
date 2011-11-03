@@ -21,7 +21,7 @@ public class Channel {
 	private Connection m_connection = null;
 	private boolean m_connected = false;
 	private boolean m_closing = false;
-	private Packet m_pendingClose;
+	private Frame m_pendingClose;
 	
 	private boolean m_readable = false;
 	private boolean m_writable = false;
@@ -152,7 +152,7 @@ public class Channel {
      *  @param token An optional token.
      */
 	public void connect(String expr, int mode, ByteBuffer token) throws ChannelError {
-		Packet packet;
+		Frame frame;
         OpenRequest request;
       
         m_connectMutex.lock();
@@ -259,12 +259,12 @@ public class Channel {
         m_connection.allocChannel();
 
         if (token != null || tokens == "") {
-            packet = new Packet(m_ch, Packet.OPEN, mode, token);
+            frame = new Frame(m_ch, Frame.OPEN, mode, token);
         } else {
-            packet = new Packet(m_ch, Packet.OPEN, mode, ByteBuffer.wrap(tokens.getBytes()));
+            frame = new Frame(m_ch, Frame.OPEN, mode, ByteBuffer.wrap(tokens.getBytes()));
         }
       
-        request = new OpenRequest(this, m_ch, packet);
+        request = new OpenRequest(this, m_ch, frame);
 
         m_error = new ChannelError("", 0x0);
       
@@ -301,13 +301,13 @@ public class Channel {
             throw new ChannelError("Priority must be between 1 - 3");
         }
 
-        Packet packet = new Packet(m_ch, Packet.DATA, priority,
+        Frame frame = new Frame(m_ch, Frame.DATA, priority,
                                 data);
       
         m_connectMutex.lock();
         Connection connection = m_connection;
         m_connectMutex.unlock();
-        result = connection.writeBytes(packet);
+        result = connection.writeBytes(frame);
 
         if (!result)
             checkForChannelError();
@@ -352,13 +352,13 @@ public class Channel {
             throw new ChannelError("You do not have permission to send signals");
         }
 
-        Packet packet = new Packet(m_ch, Packet.SIGNAL, Packet.SIG_EMIT,
+        Frame frame = new Frame(m_ch, Frame.SIGNAL, Frame.SIG_EMIT,
                             data);
 
         m_connectMutex.lock();
         Connection connection = m_connection;
         m_connectMutex.unlock();
-        result = connection.writeBytes(packet);
+        result = connection.writeBytes(frame);
 
         if (!result)
             checkForChannelError();
@@ -401,13 +401,13 @@ public class Channel {
         	return;
         }
         
-        Packet packet = new Packet(m_ch, Packet.SIGNAL, Packet.SIG_END);
+        Frame frame = new Frame(m_ch, Frame.SIGNAL, Frame.SIG_END);
         
         if (m_openRequest != null) {
         	// Open request is not responded to yet. Wait to send ENDSIG until	
             // we get an OPENRESP.
         	
-        	m_pendingClose = packet;
+        	m_pendingClose = frame;
         	m_connectMutex.unlock();
         } else {
         	m_connectMutex.unlock();
@@ -419,7 +419,7 @@ public class Channel {
         	m_connectMutex.lock();
         	Connection connection = m_connection;
         	m_connectMutex.unlock();
-        	connection.writeBytes(packet);
+        	connection.writeBytes(frame);
         	
         }
 	}
@@ -523,7 +523,7 @@ public class Channel {
 	protected void openSuccess(int respch, String message) {
 		m_connectMutex.lock();
 		int origch = m_ch;
-		Packet packet;
+		Frame frame;
 		
 		m_openRequest = null;
         m_ch = respch;
@@ -531,15 +531,15 @@ public class Channel {
         m_message = message;
       
         if (m_pendingClose != null) {
-        	packet = m_pendingClose;
+        	frame = m_pendingClose;
         	m_pendingClose = null;
             m_connectMutex.unlock();
             
             if (origch != respch) {
             	// channel is changed. We need to change the channel of the
-                //packet before sending to server.
+                //frame before sending to server.
             	
-            	packet.setChannel(respch);
+            	frame.setChannel(respch);
 			}
             
             if (HydnaDebug.HYDNADEBUG) {
@@ -549,7 +549,7 @@ public class Channel {
 			m_connectMutex.lock();
 			Connection connection = m_connection;
 			m_connectMutex.unlock();
-			connection.writeBytes(packet);
+			connection.writeBytes(frame);
         } else {
             m_connectMutex.unlock();
         }
