@@ -11,7 +11,7 @@ public class Frame {
     public static final int OPEN   = 0x01;
     public static final int DATA   = 0x02;
     public static final int SIGNAL = 0x03;
-
+    
     // Open Flags
     public static final int OPEN_ALLOW = 0x0;
     public static final int OPEN_REDIRECT = 0x1;

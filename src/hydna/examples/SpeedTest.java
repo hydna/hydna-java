@@ -19,7 +19,7 @@ public class SpeedTest {
 	        String arg = args[0];
 
 	        Channel channel = new Channel();
-	        channel.connect("localhost/x11221133", ChannelMode.READWRITE);
+	        channel.connect("localhost:7010/x11221133", ChannelMode.READWRITE);
 
 	        while(!channel.isConnected()) {
 	            channel.checkForChannelError();

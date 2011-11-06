@@ -12,10 +12,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *  to communicate with a server.
  */
 public class Channel {
-	private String m_host = "";
-	private short m_port = 80;
 	private int m_ch = 0;
-	private String m_auth = "";
 	private String m_message = "";
 	
 	private Connection m_connection = null;
@@ -43,6 +40,14 @@ public class Channel {
      *  Initializes a new Channel instance
      */
 	public Channel() {}
+	
+	public boolean getFollowRedirects() {
+		return Connection.m_followRedirects;
+	}
+	
+	public void setFollowRedirects(boolean value) {
+		Connection.m_followRedirects = value;
+	}
 	
 	/**
      *  Checks the connected state for this Channel instance.
@@ -174,86 +179,49 @@ public class Channel {
         m_writable = ((m_mode & ChannelMode.WRITE) == ChannelMode.WRITE);
         m_emitable = ((m_mode & ChannelMode.EMIT) == ChannelMode.EMIT);
 
-        String host = expr;
-        short port = 80;
-        int ch = 1;
+        URL url = URL.parse(expr);
         String tokens = "";
-        String auth = "";
+        String chs = "";
+        int ch;
         int pos;
         
         // Host can be on the form "http://auth@localhost:80/x00112233?token"
         
-        // Take out the protocol
-        pos = host.indexOf("://");
-        if (pos != -1) {
-        	String protocol = host.substring(0, pos);
-        	protocol = protocol.toLowerCase();
-        	host = host.substring(pos + 3);
-        	
-        	if (!protocol.equals("http")) {
-        		if (protocol.equals("https")) {
-        			throw new Error("The protocol HTTPS is not supported");
-        		} else {
-        			throw new Error("Unknown protocol, " + protocol);
-        		}
-        	}
+        
+    	if (!url.getProtocol().equals("http")) {
+    		if (url.getProtocol().equals("https")) {
+    			throw new Error("The protocol HTTPS is not supported");
+    		} else {
+    			throw new Error("Unknown protocol, " + url.getProtocol());
+    		}
+    	}
+        
+        if (!url.getError().equals("")) {
+            throw new Error(url.getError());
         }
         
-        // Take out the auth
-        pos = host.indexOf("@");
-        if (pos != -1) {
-            auth = host.substring(0, pos);
-            host = host.substring(pos + 1);
-        }
+        chs = url.getPath();
         
-        // Take out the token
-        pos = host.lastIndexOf("?");
-        if (pos != -1) {
-            tokens = host.substring(pos + 1);
-            host = host.substring(0, pos);
-        }
-
         // Take out the channel
-        pos = host.lastIndexOf("/x");
+        pos = chs.lastIndexOf("x");
         if (pos != -1) {
             try {
-            	ch = Integer.parseInt(host.substring(pos + 2), 16);
+            	ch = Integer.parseInt(chs.substring(pos + 1), 16);
             } catch (NumberFormatException e) {
-            	throw new ChannelError("Could not read the address \"" + host.substring(pos + 2) + "\"");
+            	throw new ChannelError("Could not read the channel \"" + chs.substring(pos + 1) + "\"");
             }
-            
-            host = host.substring(0, pos);
         } else {
-            pos = host.lastIndexOf("/");
-            if (pos != -1) {
-                try {
-                	ch = Integer.parseInt(host.substring(pos + 1), 10);
-                } catch (NumberFormatException e) {
-                   throw new ChannelError("Could not read the address \"" + host.substring(pos + 1) + "\""); 
-                }
-                
-                host = host.substring(0, pos);
+            try {
+            	ch = Integer.parseInt(chs, 10);
+            } catch (NumberFormatException e) {
+               throw new ChannelError("Could not read the channel \"" + chs + "\""); 
             }
-        }
-
-        // Take out the port
-        pos = host.lastIndexOf(":");
-        if (pos != -1) {
-        	try {
-        	port = Short.parseShort(host.substring(pos + 1), 10);
-        	} catch (NumberFormatException e) {
-               throw new ChannelError("Could not read the port \"" + host.substring(pos + 1) + "\""); 
-            }
-        	
-        	host = host.substring(0, pos);
         }
         
-        m_host = host;
-        m_port = port;
+        tokens = url.getToken();
         m_ch = ch;
-        m_auth = auth;
 
-        m_connection = Connection.getConnection(m_host, m_port, m_auth);
+        m_connection = Connection.getConnection(url.getHost(), url.getPort(), url.getAuth());
       
         // Ref count
         m_connection.allocChannel();

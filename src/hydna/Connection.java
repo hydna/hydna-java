@@ -28,6 +28,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *  A user of the library should not create an instance of this class.
  */
 public class Connection implements Runnable {
+	private static final int MAX_REDIRECT_ATTEMPTS = 5;
 	private static Map<String, Connection> m_availableConnections = new HashMap<String, Connection>();
 	private static Lock m_connectionMutex = new ReentrantLock();
 	
@@ -49,6 +50,7 @@ public class Connection implements Runnable {
 	private String m_host;
 	private short m_port;
 	private String m_auth = "";
+	private int m_attempt = 0;
 	
 	private SocketChannel m_socketChannel;
 	private Socket m_socket;
@@ -62,6 +64,8 @@ public class Connection implements Runnable {
 	private int m_channelRefCount = 0;
 	
 	private Thread m_listeningThread;
+	
+	public static boolean m_followRedirects = true;
 	
 	/**
      *  Return an available connection or create a new one.
@@ -320,8 +324,10 @@ public class Connection implements Runnable {
      *  @param port The port to connect to.
      */
 	private void connectConnection(String host, int port, String auth) {
+		++m_attempt;
+		
         if (HydnaDebug.HYDNADEBUG) {
-        	DebugHelper.debugPrint("Connection", 0, "Connecting...");
+        	DebugHelper.debugPrint("Connection", 0, "Connecting, attempt " + m_attempt);
         }
         
         try {
@@ -348,7 +354,7 @@ public class Connection implements Runnable {
         } catch (UnresolvedAddressException e) {
         	destroy(new ChannelError("The host \"" + host + "\" could not be resolved"));
         } catch (IOException e) {
-        	destroy(new ChannelError("Could not connect to the host \"" + host + "\""));
+        	destroy(new ChannelError("Could not connect to the host \"" + host + "\" on the port " + port));
         }
 	}
 	
@@ -362,11 +368,13 @@ public class Connection implements Runnable {
             m_outStream.writeBytes("GET /" + auth + " HTTP/1.1\n" +
             					   "Connection: upgrade\n" +
             					   "Upgrade: winksock/1\n" +
-            					   "Host: " + m_host);
+            					   "Host: " + m_host + "\n" +
+            					   "X-Follow-Redirects: ");
             
-            // Redirects are not supported yet
-            if (true) {
-            	m_outStream.writeBytes("\nX-Follow-Redirects: no");
+            if (m_followRedirects) {
+            	m_outStream.writeBytes("yes");
+            } else {
+            	m_outStream.writeBytes("no");
             }
             
             m_outStream.writeBytes("\n\n");
@@ -392,6 +400,8 @@ public class Connection implements Runnable {
         
         boolean fieldsLeft = true;
         boolean gotResponse = false;
+        boolean gotRedirect = false;
+        String location = "";
         
         while (fieldsLeft) {
         	String line;
@@ -430,11 +440,23 @@ public class Connection implements Runnable {
         			case 101:
         				// Everything is ok, continue.
         				break;
+        			case 300:
         			case 301:
         			case 302:
-        			case 307:
-        				destroy(new ChannelError("Could not read the status from the response \"" + line + "\""));
-        				return;
+        			case 303:
+        			case 304:
+        				if (!m_followRedirects) {
+        					destroy(new ChannelError("Bad handshake (HTTP-redirection disabled)"));
+        					return;
+        				}
+        				
+        				if (m_attempt > MAX_REDIRECT_ATTEMPTS) {
+        					destroy(new ChannelError("Bad handshake (Too manu redirect attemps)"));
+        					return;
+        				}
+        				
+        				gotRedirect = true;
+        				break;
         			default:
         				destroy(new ChannelError("Server responded with bad HTTP response code, " + code));
         			}
@@ -443,19 +465,51 @@ public class Connection implements Runnable {
         		} else {
         			line = line.toLowerCase();
         			int pos;
-        			
-        			pos = line.indexOf("upgrade: ");
-        			if (pos != -1) {
-        				String header = line.substring(9);
-        				if (!header.equals("winksock/1")) {
-        					destroy(new ChannelError("Bad protocol version: " + header));
-        					return;
+
+        			if (gotRedirect) {
+        				pos = line.indexOf("location: ");
+        				if (pos != -1) {
+        					location = line.substring(10);
         				}
+        			} else {
+        				pos = line.indexOf("upgrade: ");
+		    			if (pos != -1) {
+		    				String header = line.substring(9);
+		    				if (!header.equals("winksock/1")) {
+		    					destroy(new ChannelError("Bad protocol version: " + header));
+		    					return;
+		    				}
+		    			}
         			}
         		}
         	}
         }
 
+        if (gotRedirect) {
+        	m_connected = false;
+        	
+        	if (HydnaDebug.HYDNADEBUG) {
+            	DebugHelper.debugPrint("Connection", 0, "Redirected to location: " + location);
+            }
+        	
+        	URL url = URL.parse(location);
+        	
+        	if (!url.getProtocol().equals("http")) {
+        		if (!url.getProtocol().equals("https")) {
+        			destroy(new ChannelError("The protocol HTTPS is not supported"));
+        		} else {
+        			destroy(new ChannelError("Unknown protocol, " + url.getProtocol()));
+        		}
+        	}
+        	
+        	if (!url.getError().equals("")) {
+        		destroy(new ChannelError(url.getError()));
+        	}
+        	
+        	connectConnection(url.getHost(), url.getPort(), url.getPath());
+        	return;
+        }
+        
         m_handshaked = true;
         m_connecting = false;
 
