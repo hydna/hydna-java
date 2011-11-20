@@ -524,7 +524,7 @@ public class Channel {
 	}
 	
 	/**
-     *  Internally destroy connection.
+     *  Internally destroy channel.
      *
      *  @param error The cause of the destroy.
      */

@@ -920,16 +920,14 @@ public class Connection implements Runnable {
 
             if (m_openChannels.containsKey(ch))
                 channel = m_openChannels.get(ch);
-
+            m_openChannelsMutex.unlock();
+            
             if (channel == null) {
-                m_openChannelsMutex.unlock();
                 destroy(new ChannelError("Received unknown channel"));
                 return;
             }
             
             if (flag != Frame.SIG_EMIT && !channel.isClosing()) {
-            	m_openChannelsMutex.unlock();
-            	
             	Frame frame = new Frame(ch, Frame.SIGNAL, Frame.SIG_END, payload);
 				writeBytes(frame);
 				
@@ -937,7 +935,6 @@ public class Connection implements Runnable {
 			}
 
             processSignalFrame(channel, flag, payload);
-            m_openChannelsMutex.unlock();
         }
 	}
 	
