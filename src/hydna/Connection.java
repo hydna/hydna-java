@@ -365,10 +365,10 @@ public class Connection implements Runnable {
         boolean success = false;
 
     	try {
-            m_outStream.writeBytes("GET /" + auth + " HTTP/1.1\n" +
-            					   "Connection: upgrade\n" +
-            					   "Upgrade: winksock/1\n" +
-            					   "Host: " + m_host + "\n" +
+            m_outStream.writeBytes("GET /" + auth + " HTTP/1.1\r\n" +
+            					   "Connection: upgrade\r\n" +
+            					   "Upgrade: winksock/1\r\n" +
+            					   "Host: " + m_host + "\r\n" +
             					   "X-Follow-Redirects: ");
             
             if (m_followRedirects) {
@@ -377,7 +377,7 @@ public class Connection implements Runnable {
             	m_outStream.writeBytes("no");
             }
             
-            m_outStream.writeBytes("\n\n");
+            m_outStream.writeBytes("\r\n\r\n");
             success = true;
     	} catch (IOException e) {
     		success = false;
