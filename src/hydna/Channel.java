@@ -201,7 +201,12 @@ public class Channel {
         }
         
         chs = url.getPath();
-        
+
+        // Default to channel 1;
+        if (chs.length() == 0) {
+        	chs = "1";
+        }
+
         // Take out the channel
         pos = chs.lastIndexOf("x");
         if (pos != -1) {
