@@ -16,7 +16,7 @@ import hydna.ChannelSignal;
 public class Signals {
 	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
 		Channel channel = new Channel();
-	    channel.connect("localhost:7010/x00112233", ChannelMode.READWRITEEMIT);
+	    channel.connect("public.hydna.net/1", ChannelMode.READWRITEEMIT);
 
 	    while(!channel.isConnected()) {
 	        channel.checkForChannelError();

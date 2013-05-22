@@ -16,7 +16,7 @@ import hydna.ChannelMode;
 public class HelloWorld {
 	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
 		Channel channel = new Channel();
-	    channel.connect("localhost:7010/x11221133", ChannelMode.READWRITE);
+	    channel.connect("public.hydna.net/1", ChannelMode.READWRITE);
 	
 	    while(!channel.isConnected()) {
 	        channel.checkForChannelError();
@@ -28,7 +28,7 @@ public class HelloWorld {
 	    	System.out.println(message);
 	    }
 	    
-	    channel.writeString("Hello World");
+	    channel.writeString("Hello World from java");
 	
 	    for (;;) {
 	        if (!channel.isDataEmpty()) {

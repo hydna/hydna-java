@@ -183,7 +183,6 @@ public class Channel {
         String tokens = "";
         String chs = "";
         int ch;
-        int pos;
         
         // Host can be on the form "http://auth@localhost:80/x00112233?token"
         
@@ -202,25 +201,16 @@ public class Channel {
         
         chs = url.getPath();
 
-        // Default to channel 1;
-        if (chs.length() == 0) {
-        	chs = "1";
-        }
-
         // Take out the channel
-        pos = chs.lastIndexOf("x");
-        if (pos != -1) {
+
+        if (chs.length() > 0) {
             try {
-            	ch = Integer.parseInt(chs.substring(pos + 1), 16);
+            	ch = Integer.parseInt(chs, 16);
             } catch (NumberFormatException e) {
-            	throw new ChannelError("Could not read the channel \"" + chs.substring(pos + 1) + "\"");
+            	throw new ChannelError("Could not read the channel \"" + chs + "\"");
             }
         } else {
-            try {
-            	ch = Integer.parseInt(chs, 10);
-            } catch (NumberFormatException e) {
-               throw new ChannelError("Could not read the channel \"" + chs + "\""); 
-            }
+            ch = 1;
         }
         
         tokens = url.getToken();

@@ -16,10 +16,10 @@ import hydna.ChannelMode;
 public class MultipleChannels {
 	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
 		Channel channel = new Channel();
-	    channel.connect("localhost:7010/x11221133", ChannelMode.READWRITE);
+	    channel.connect("public.hydna.net/1", ChannelMode.READWRITE);
 	    
 	    Channel channel2 = new Channel();
-	    channel2.connect("localhost:7010/x3333", ChannelMode.READWRITE);
+	    channel2.connect("public.hydna.net/2", ChannelMode.READWRITE);
 	
 	    while(!channel.isConnected()) {
 	        channel.checkForChannelError();

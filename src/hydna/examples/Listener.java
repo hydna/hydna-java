@@ -16,7 +16,7 @@ import hydna.ChannelMode;
 public class Listener {
 	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
 		Channel channel = new Channel();
-	    channel.connect("localhost:7010/x11221133", ChannelMode.READWRITE);
+	    channel.connect("public.hydna.net/1", ChannelMode.READWRITE);
 
 	    while(!channel.isConnected()) {
 	        channel.checkForChannelError();

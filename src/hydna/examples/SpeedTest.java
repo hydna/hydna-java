@@ -19,7 +19,7 @@ public class SpeedTest {
 	        String arg = args[0];
 
 	        Channel channel = new Channel();
-	        channel.connect("localhost:7010/x11221133", ChannelMode.READWRITE);
+	        channel.connect("public.hydna.net/10", ChannelMode.READWRITE);
 
 	        while(!channel.isConnected()) {
 	            channel.checkForChannelError();
@@ -29,7 +29,7 @@ public class SpeedTest {
 	        long time = 0;
 
 	        if (arg.equals("receive")) {
-	            System.out.println("Receiving from x11221133");
+	            System.out.println("Receiving from channel 10");
 
 	            for(;;) {
 	                if (!channel.isDataEmpty()) {
@@ -52,7 +52,7 @@ public class SpeedTest {
 	                }
 	            }
 	        } else if (arg.equals("send")) {
-	            System.out.println("Sending " + NO_BROADCASTS + " frames to x11221133");
+	            System.out.println("Sending " + NO_BROADCASTS + " frames to channel 10");
 
 	            time = System.nanoTime();
 
