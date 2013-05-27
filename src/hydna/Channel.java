@@ -1,6 +1,9 @@
 package hydna;
 
+import java.io.UnsupportedEncodingException;
+
 import java.nio.ByteBuffer;
+
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.locks.Lock;
@@ -12,6 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *  to communicate with a server.
  */
 public class Channel {
+
 	private int m_ch = 0;
 	private String m_message = "";
 	
@@ -256,7 +260,52 @@ public class Channel {
      *  @param priority The priority of the data.
      */
 	public void writeBytes(ByteBuffer data, int priority) throws ChannelError {
+		writeBytes(data, priority, 0);
+	}
+	
+	/**
+     *  Sends data to the channel.
+     *
+     *  @param data The data to write to the channel.
+     */
+	public void writeBytes(ByteBuffer data) throws ChannelError {
+		writeBytes(data, 0, 0);
+	}
+	
+	/**
+     *  Sends an UTF8 string to the channel.
+     *
+     *  @param value The string to be sent.
+     *  @param priority The priority of the data.
+     */
+	public void writeString(String value) throws ChannelError {
+		writeString(value, 0);
+	}
+
+
+	/**
+     *  Sends string data to the channel.
+     *
+     *  @param value The string to be sent.
+     */
+	public void writeString(String value, int priority) throws ChannelError {
+		try {
+			ByteBuffer payload = ByteBuffer.wrap(value.getBytes("UTF-8"));
+			writeBytes(payload, priority, 1);
+		} catch (UnsupportedEncodingException ex) {
+		}
+	}
+
+	/**
+     *  Sends data to the channel.
+     *
+     *  @param data The data to write to the channel.
+     *  @param priority The priority of the data.
+     */
+	private void writeBytes(ByteBuffer data, int priority, int type)
+				 throws ChannelError {
 		boolean result;
+		int flag;
 
         m_connectMutex.lock();
         if (!m_connected || m_connection == null) {
@@ -269,13 +318,14 @@ public class Channel {
         if (!m_writable) {
             throw new ChannelError("Channel is not writable");
         }
-      
+
         if (priority > 3 || priority < 0) {
             throw new ChannelError("Priority must be between 0 - 3");
         }
 
-        Frame frame = new Frame(m_ch, Frame.DATA, priority,
-                                data);
+        flag = priority << 1 | type;
+
+        Frame frame = new Frame(m_ch, Frame.DATA, flag, data);
       
         m_connectMutex.lock();
         Connection connection = m_connection;
@@ -285,25 +335,7 @@ public class Channel {
         if (!result)
             checkForChannelError();
 	}
-	
-	/**
-     *  Sends data to the channel.
-     *
-     *  @param data The data to write to the channel.
-     */
-	public void writeBytes(ByteBuffer data) throws ChannelError {
-		writeBytes(data, 0);
-	}
-	
-	/**
-     *  Sends string data to the channel.
-     *
-     *  @param value The string to be sent.
-     */
-	public void writeString(String value) throws ChannelError {
-		writeBytes(ByteBuffer.wrap(value.getBytes()));
-	}
-	
+
 	/**
      *  Sends data signal to the channel.
      *
