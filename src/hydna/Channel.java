@@ -270,8 +270,8 @@ public class Channel {
             throw new ChannelError("Channel is not writable");
         }
       
-        if (priority > 3 || priority == 0) {
-            throw new ChannelError("Priority must be between 1 - 3");
+        if (priority > 3 || priority < 0) {
+            throw new ChannelError("Priority must be between 0 - 3");
         }
 
         Frame frame = new Frame(m_ch, Frame.DATA, priority,
