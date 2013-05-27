@@ -292,7 +292,7 @@ public class Channel {
      *  @param data The data to write to the channel.
      */
 	public void writeBytes(ByteBuffer data) throws ChannelError {
-		writeBytes(data, 1);
+		writeBytes(data, 0);
 	}
 	
 	/**
