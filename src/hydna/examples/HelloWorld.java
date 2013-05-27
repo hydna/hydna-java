@@ -1,10 +1,5 @@
 package hydna.examples;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
-
 import hydna.Channel;
 import hydna.ChannelData;
 import hydna.ChannelError;
@@ -14,7 +9,7 @@ import hydna.ChannelMode;
  *  Hello world example
  */
 public class HelloWorld {
-	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
+	public static void main(String[] args) throws ChannelError, InterruptedException {
 		Channel channel = new Channel();
 	    channel.connect("public.hydna.net", ChannelMode.READWRITE);
 	
@@ -24,24 +19,17 @@ public class HelloWorld {
 	    }
 	    
 	    String message = channel.getMessage();
+
 	    if (!message.equals("")) {
 	    	System.out.println(message);
 	    }
-	    
-	    channel.writeString("Hello World from java");
-	
+
+	    channel.writeString("Hello world from java");
+
 	    for (;;) {
 	        if (!channel.isDataEmpty()) {
 	            ChannelData data = channel.popData();
-	            ByteBuffer payload = data.getContent();
-	
-	            Charset charset = Charset.forName("US-ASCII");
-            	CharsetDecoder decoder = charset.newDecoder();
-				
-            	String m = decoder.decode(payload).toString();
-				
-            	System.out.println(m);
-            	
+            	System.out.println(data.getString());
 	            break;
 	        } else {
 	            channel.checkForChannelError();
