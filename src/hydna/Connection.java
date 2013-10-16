@@ -20,6 +20,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -32,12 +33,8 @@ public class Connection implements Runnable {
     private static Map<String, Connection> m_availableConnections = new HashMap<String, Connection>();
     private static Lock m_connectionMutex = new ReentrantLock();
 
-    private Lock m_channelRefMutex = new ReentrantLock();
     private Lock m_destroyingMutex = new ReentrantLock();
     private Lock m_closingMutex = new ReentrantLock();
-    private Lock m_openChannelsMutex = new ReentrantLock();
-    private Lock m_openWaitMutex = new ReentrantLock();
-    private Lock m_pendingMutex = new ReentrantLock();
     private Lock m_listeningMutex = new ReentrantLock();
 
     private boolean m_connecting = false;
@@ -55,8 +52,8 @@ public class Connection implements Runnable {
     private DataOutputStream m_outStream;
     private BufferedReader m_inStreamReader;
 
-    private Map<Integer, OpenRequest> m_pendingOpenRequests = new HashMap<Integer, OpenRequest>();
-    private Map<Integer, Channel> m_openChannels = new HashMap<Integer, Channel>();
+    private Map<Integer, OpenRequest> m_pendingOpenRequests;
+    private Map<Integer, Channel> m_openChannels;
 
     private int m_channelRefCount = 0;
 
@@ -96,6 +93,9 @@ public class Connection implements Runnable {
     public Connection(String host, short port) {
         m_host = host;
         m_port = port;
+
+        m_openChannels = new ConcurrentHashMap<Integer, Channel>();
+        m_pendingOpenRequests = new HashMap<Integer, OpenRequest>();
     }
 	
     /**
@@ -111,10 +111,8 @@ public class Connection implements Runnable {
      * Method to keep track of the number of channels that is associated 
      * with this connection instance.
      */
-    public void allocChannel() {
-        m_channelRefMutex.lock();
+    synchronized void allocChannel() {
         m_channelRefCount++;
-        m_channelRefMutex.unlock();
         
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Allocating a new channel, channel ref count is " + m_channelRefCount);
@@ -126,7 +124,7 @@ public class Connection implements Runnable {
      *
      *  @param addr The channel to dealloc.
      */
-    public void deallocChannel(int ch) {
+    synchronized void deallocChannel(int ch) {
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", ch, "Deallocating a channel");
         }
@@ -137,21 +135,17 @@ public class Connection implements Runnable {
             m_closingMutex.unlock();
             m_destroyingMutex.unlock();
 
-            m_openChannelsMutex.lock();
             m_openChannels.remove(ch);
             
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", ch, "Size of openSteams is now " + m_openChannels.size());
             }
-            m_openChannelsMutex.unlock();
         } else  {
             m_closingMutex.unlock();
             m_destroyingMutex.unlock();
         }
       
-        m_channelRefMutex.lock();
         --m_channelRefCount;
-        m_channelRefMutex.unlock();
 
         checkRefCount();
     }
@@ -159,10 +153,8 @@ public class Connection implements Runnable {
     /**
      *  Check if there are any more references to the connection.
      */
-    private void checkRefCount() {
-        m_channelRefMutex.lock();
+    private synchronized void checkRefCount() {
         if (m_channelRefCount == 0) {
-            m_channelRefMutex.unlock();
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", 0, "No more refs, destroy connection");
             }
@@ -177,8 +169,6 @@ public class Connection implements Runnable {
                 m_closingMutex.unlock();
                 m_destroyingMutex.unlock();
             }
-        } else {
-            m_channelRefMutex.unlock();
         }
     }
 
@@ -199,32 +189,21 @@ public class Connection implements Runnable {
             DebugHelper.debugPrint("Connection", chcomp, "A channel is trying to send a new open request");
         }
 
-        m_openChannelsMutex.lock();
-
         if ((channel = m_openChannels.get(chcomp)) != null) {
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", chcomp, "The channel was already open, cancel the open request");
             }
-            m_openChannelsMutex.unlock();
             return channel.setPendingOpenRequest(request);
         }
-
-        m_openChannelsMutex.unlock();
-
-        m_pendingMutex.lock();
 
         if ((currentRequest = m_pendingOpenRequests.get(chcomp)) != null) {
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", chcomp, "A open request is waiting to be sent, queue up the new open request");
             }
-            m_pendingMutex.unlock();
             return currentRequest.getChannel().setPendingOpenRequest(request);
         }
 
         m_pendingOpenRequests.put(chcomp, request);
-
-        m_pendingMutex.unlock();
-
 
         if (!m_connecting) {
             m_connecting = true;
@@ -254,9 +233,7 @@ public class Connection implements Runnable {
             return false;
         }
       
-        m_pendingMutex.lock();
         m_pendingOpenRequests.remove(channelcomp);
-        m_pendingMutex.unlock();
       
         return true;
     }
@@ -559,9 +536,7 @@ public class Connection implements Runnable {
         int respch = 0;
         String message = "";
         
-        m_pendingMutex.lock();
         request = m_pendingOpenRequests.get(ch);
-        m_pendingMutex.unlock();
 
         if (request == null) {
             destroy(new ChannelError("The server sent a invalid open frame"));
@@ -583,9 +558,7 @@ public class Connection implements Runnable {
                 }
             }
         } else {
-            m_pendingMutex.lock();
             m_pendingOpenRequests.remove(ch);
-            m_pendingMutex.unlock();
 
             String m = "";
             if (payload != null && payload.capacity() > 0) {
@@ -605,22 +578,16 @@ public class Connection implements Runnable {
             return;
         }
 
-        m_openChannelsMutex.lock();
-
         m_openChannels.put(respch, channel);
+
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", respch, "A new channel was added");
             DebugHelper.debugPrint("Connection", respch, "The size of openChannels is now " + m_openChannels.size());
         }
-        m_openChannelsMutex.unlock();
 
         channel.openSuccess(respch, message);
 
-        m_openWaitMutex.lock();
-        m_pendingMutex.lock();
         m_pendingOpenRequests.remove(ch);
-        m_pendingMutex.unlock();
-        m_openWaitMutex.unlock();
     }
 	
     /**
@@ -634,10 +601,7 @@ public class Connection implements Runnable {
         Channel channel = null;
         ChannelData data;
 
-        m_openChannelsMutex.lock();
-        if (m_openChannels.containsKey(ch))
-            channel = m_openChannels.get(ch);
-        m_openChannelsMutex.unlock();
+        channel = m_openChannels.get(ch);
 
         if (channel == null) {
             destroy(new ChannelError("No channel was available to take care of the data received"));
@@ -703,7 +667,6 @@ public class Connection implements Runnable {
      */
     private void processSignalFrame(int ch, int flag, ByteBuffer payload) {
         if (ch == 0) {
-            m_openChannelsMutex.lock();
             boolean destroying = false;
             int size = payload.capacity();
 
@@ -736,8 +699,6 @@ public class Connection implements Runnable {
                 }
             }
 
-            m_openChannelsMutex.unlock();
-
             if (destroying) {
                 m_closingMutex.lock();
                 m_closing = false;
@@ -746,12 +707,9 @@ public class Connection implements Runnable {
                 checkRefCount();
             }
         } else {
-            m_openChannelsMutex.lock();
             Channel channel = null;
 
-            if (m_openChannels.containsKey(ch))
-                channel = m_openChannels.get(ch);
-            m_openChannelsMutex.unlock();
+            channel = m_openChannels.get(ch);
 
             if (channel == null) {
                 destroy(new ChannelError("Received unknown channel"));
@@ -783,7 +741,6 @@ public class Connection implements Runnable {
             DebugHelper.debugPrint("Connection",0, "Destroying connection because: " + error.getMessage());
         }
 
-        m_pendingMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Destroying pendingOpenRequests of size " + m_pendingOpenRequests.size());
         }
@@ -795,9 +752,7 @@ public class Connection implements Runnable {
             request.getChannel().destroy(error);
         }
         m_pendingOpenRequests.clear();
-        m_pendingMutex.unlock();
 
-        m_openChannelsMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Destroying openChannels of size " + m_openChannels.size());
         }
@@ -808,7 +763,7 @@ public class Connection implements Runnable {
             channel.destroy(error);
         }				
         m_openChannels.clear();
-        m_openChannelsMutex.unlock();
+
 
         if (m_connected) {
             if (HydnaDebug.HYDNADEBUG) {
