@@ -45,14 +45,6 @@ public class Channel {
      */
     public Channel() {}
 	
-        public boolean getFollowRedirects() {
-            return Connection.m_followRedirects;
-        }
-	
-        public void setFollowRedirects(boolean value) {
-            Connection.m_followRedirects = value;
-        }
-	
         /**
          *  Checks the connected state for this Channel instance.
          *
