@@ -9,32 +9,32 @@ import hydna.ChannelMode;
  *  Hello world example
  */
 public class HelloWorld {
-	public static void main(String[] args) throws ChannelError, InterruptedException {
-		Channel channel = new Channel();
-	    channel.connect("public.hydna.net", ChannelMode.READWRITE);
+    public static void main(String[] args) throws ChannelError, InterruptedException {
+        Channel channel = new Channel();
+        channel.connect("public.hydna.net", ChannelMode.READWRITE);
 	
-	    while(!channel.isConnected()) {
-	        channel.checkForChannelError();
-	        Thread.sleep(1000);
-	    }
+        while(!channel.isConnected()) {
+            channel.checkForChannelError();
+            Thread.sleep(1000);
+        }
 	    
-	    String message = channel.getMessage();
+        String message = channel.getMessage();
 
-	    if (!message.equals("")) {
-	    	System.out.println(message);
-	    }
+        if (!message.equals("")) {
+            System.out.println(message);
+        }
 
-	    channel.writeString("Hello world from java");
+        channel.writeString("Hello world from java");
 
-	    for (;;) {
-	        if (!channel.isDataEmpty()) {
-	            ChannelData data = channel.popData();
-            	System.out.println(data.getString());
-	            break;
-	        } else {
-	            channel.checkForChannelError();
-	        }
-	    }
-	    channel.close();
-	}
+        for (;;) {
+            if (!channel.isDataEmpty()) {
+                ChannelData data = channel.popData();
+                System.out.println(data.getString());
+                break;
+            } else {
+                channel.checkForChannelError();
+            }
+        }
+        channel.close();
+    }
 }

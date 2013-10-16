@@ -14,39 +14,40 @@ import hydna.ChannelSignal;
  *  Signal example
  */
 public class Signals {
-	public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
-		Channel channel = new Channel();
-	    channel.connect("public.hydna.net/1", ChannelMode.READWRITEEMIT);
+    public static void main(String[] args)
+    throws CharacterCodingException, ChannelError, InterruptedException {
+        Channel channel = new Channel();
+        channel.connect("public.hydna.net/1", ChannelMode.READWRITEEMIT);
 
-	    while(!channel.isConnected()) {
-	        channel.checkForChannelError();
-	        Thread.sleep(1000);
-	    }
+        while(!channel.isConnected()) {
+            channel.checkForChannelError();
+            Thread.sleep(1000);
+        }
 
-	    String message = channel.getMessage();
-	    if (!message.equals("")) {
-	    	System.out.println(message);
-	    }
+        String message = channel.getMessage();
+        if (!message.equals("")) {
+            System.out.println(message);
+        }
 	    
-	    channel.emitString("ping");
+        channel.emitString("ping");
 
-	    for (;;) {
-	        if (!channel.isSignalEmpty()) {
-	            ChannelSignal signal = channel.popSignal();
-	            ByteBuffer payload = signal.getContent();
+        for (;;) {
+            if (!channel.isSignalEmpty()) {
+                ChannelSignal signal = channel.popSignal();
+                ByteBuffer payload = signal.getContent();
 
-	            Charset charset = Charset.forName("US-ASCII");
-            	CharsetDecoder decoder = charset.newDecoder();
+                Charset charset = Charset.forName("US-ASCII");
+                CharsetDecoder decoder = charset.newDecoder();
 				
-            	String m = decoder.decode(payload).toString();
+                String m = decoder.decode(payload).toString();
 				
-            	System.out.println(m);
+                System.out.println(m);
 	            
-	            break;
-	        } else {
-	            channel.checkForChannelError();
-	        }
-	    }
-	    channel.close();
-	}
+                break;
+            } else {
+                channel.checkForChannelError();
+            }
+        }
+        channel.close();
+    }
 }
