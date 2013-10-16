@@ -422,7 +422,8 @@ public class Connection implements Runnable {
                     int code = 0;
                     int pos1, pos2;
         			
-                    // Take the response code from "HTTP/1.1 101 Switching Protocols"
+                    // Take the response code from "HTTP/1.1 101
+                    // Switching Protocols"
                     pos1 = line.indexOf(" ");
                     if (pos1 != -1) {
                         pos2 = line.indexOf(" ", pos1 + 1);
