@@ -32,6 +32,7 @@ public class Channel {
 	
     private int m_mode;
     private OpenRequest m_openRequest = null;
+    private OpenRequest m_pendingRequest = null;
 	
     private Queue<ChannelData> m_dataQueue = new LinkedList<ChannelData>();
     private Queue<ChannelSignal> m_signalQueue = new LinkedList<ChannelSignal>();
@@ -222,7 +223,7 @@ public class Channel {
             tokens = url.getToken();
             m_ch = ch;
 
-            m_connection = Connection.getConnection(url.getHost(), url.getPort(), url.getAuth());
+            m_connection = Connection.getConnection(url.getHost(), url.getPort());
       
             // Ref count
             m_connection.allocChannel();
@@ -494,10 +495,10 @@ public class Channel {
             m_signalMutex.lock();
             ChannelSignal signal = m_signalQueue.poll();
             m_signalMutex.unlock();
-		
+
             return signal;
         }
-	
+
         /**
          *  Checks if the signal queue is empty.
          *
@@ -507,10 +508,28 @@ public class Channel {
             m_signalMutex.lock();
             boolean result = m_signalQueue.isEmpty();
             m_signalMutex.unlock();
-		
+
             return result;
         }
-	
+
+
+        synchronized boolean setPendingOpenRequest(OpenRequest request) {
+      
+          if (m_closing) {
+            // Do not allow pending request if we are not closing.
+            return false;
+          }
+
+          if (m_pendingRequest != null) {
+            return m_pendingRequest.getChannel().setPendingOpenRequest(request);
+          }
+
+          m_pendingRequest = request;
+
+          return true;
+        }
+
+
         /**
          *  Internal callback for open success.
          *  Used by the Connection class.

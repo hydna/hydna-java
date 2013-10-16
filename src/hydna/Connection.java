@@ -49,8 +49,6 @@ public class Connection implements Runnable {
 
     private String m_host;
     private short m_port;
-    private String m_auth = "";
-    private int m_attempt = 0;
 
     private SocketChannel m_socketChannel;
     private Socket m_socket;
@@ -59,7 +57,6 @@ public class Connection implements Runnable {
 
     private Map<Integer, OpenRequest> m_pendingOpenRequests = new HashMap<Integer, OpenRequest>();
     private Map<Integer, Channel> m_openChannels = new HashMap<Integer, Channel>();
-    private Map<Integer, Queue<OpenRequest>> m_openWaitQueue = new HashMap<Integer, Queue<OpenRequest>>();
 
     private int m_channelRefCount = 0;
 
@@ -73,16 +70,16 @@ public class Connection implements Runnable {
      *  @param port The port associated with the connection.
      *  @return The connection.
      */
-    public static Connection getConnection(String host, short port, String auth) {
+    public static Connection getConnection(String host, short port) {
         Connection connection;
         String ports = Short.toString(port);
-        String key = host + ports + auth;
+        String key = host + ports;
       
         m_connectionMutex.lock();
         if (m_availableConnections.containsKey(key)) {
             connection = m_availableConnections.get(key);
         } else {
-            connection = new Connection(host, port, auth);
+            connection = new Connection(host, port);
             m_availableConnections.put(key, connection);
         }
         m_connectionMutex.unlock();
@@ -96,10 +93,9 @@ public class Connection implements Runnable {
      *  @param host The host the connection should connect to.
      *  @param port The port the connection should connect to.
      */
-    public Connection(String host, short port, String auth) {
+    public Connection(String host, short port) {
         m_host = host;
         m_port = port;
-        m_auth = auth;
     }
 	
     /**
@@ -185,76 +181,63 @@ public class Connection implements Runnable {
             m_channelRefMutex.unlock();
         }
     }
-	
+
+
     /**
      *  Request to open a channel.
      *
      *  @param request The request to open the channel.
      *  @return True if request went well, else false.
      */
-    public boolean requestOpen(OpenRequest request) {
+    boolean requestOpen(OpenRequest request) {
         int chcomp = request.getChannelId();
         Queue<OpenRequest> queue;
+        OpenRequest currentRequest;
+        Channel channel;
 
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", chcomp, "A channel is trying to send a new open request");
         }
 
         m_openChannelsMutex.lock();
-        if (m_openChannels.containsKey(chcomp)) {
-            m_openChannelsMutex.unlock();
-            
+
+        if ((channel = m_openChannels.get(chcomp)) != null) {
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", chcomp, "The channel was already open, cancel the open request");
             }
-            
-            return false;
+            m_openChannelsMutex.unlock();
+            return channel.setPendingOpenRequest(request);
         }
+
         m_openChannelsMutex.unlock();
 
         m_pendingMutex.lock();
-        if (m_pendingOpenRequests.containsKey(chcomp)) {
-            m_pendingMutex.unlock();
 
+        if ((currentRequest = m_pendingOpenRequests.get(chcomp)) != null) {
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", chcomp, "A open request is waiting to be sent, queue up the new open request");
             }
-            
-            m_openWaitMutex.lock();
-            queue = m_openWaitQueue.get(chcomp);
-        
-            if (queue == null) {
-                queue = new LinkedList<OpenRequest>();
-                m_openWaitQueue.put(chcomp, queue);
-            } 
-        
-            queue.add(request);
-            m_openWaitMutex.unlock();
-        } else if (!m_handshaked) {
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", chcomp, "No connection, queue up the new open request");
-            }
-            
-            m_pendingOpenRequests.put(chcomp, request);
             m_pendingMutex.unlock();
-            
-            if (!m_connecting) {
-                m_connecting = true;
-                connectConnection(m_host, m_port, m_auth);
-            }
-        } else {
-            m_pendingOpenRequests.put(chcomp, request);
-            m_pendingMutex.unlock();
+            return currentRequest.getChannel().setPendingOpenRequest(request);
+        }
 
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", chcomp, "Already connected, sending the new open request");
-            }
+        m_pendingOpenRequests.put(chcomp, request);
 
+        m_pendingMutex.unlock();
+
+
+        if (!m_connecting) {
+            m_connecting = true;
+            connectConnection(m_host, m_port);
+            return true;
+        }
+
+        if (m_handshaked) {
             writeBytes(request.getFrame());
             request.setSent(true);
         }
-      
-        return m_connected;
+
+        return true;
     }
 	
     /**
@@ -266,54 +249,16 @@ public class Connection implements Runnable {
      */
     public boolean cancelOpen(OpenRequest request) {
         int channelcomp = request.getChannelId();
-        Queue<OpenRequest> queue;
-        Queue<OpenRequest> tmp = new LinkedList<OpenRequest>();
-        boolean found = false;
       
         if (request.isSent()) {
             return false;
         }
       
-        m_openWaitMutex.lock();
-        queue = m_openWaitQueue.get(channelcomp);
-      
         m_pendingMutex.lock();
-        if (m_pendingOpenRequests.containsKey(channelcomp)) {
-            m_pendingOpenRequests.remove(channelcomp);
-        
-            if (queue != null && queue.size() > 0)  {
-                m_pendingOpenRequests.put(channelcomp, queue.poll());
-            }
-
-            m_pendingMutex.unlock();
-            m_openWaitMutex.unlock();
-            return true;
-        }
+        m_pendingOpenRequests.remove(channelcomp);
         m_pendingMutex.unlock();
       
-        // Should not happen...
-        if (queue == null) {
-            m_openWaitMutex.unlock();
-            return false;
-        }
-      
-        while (!queue.isEmpty() && !found) {
-            OpenRequest r = queue.poll();
-            
-            if (r == request) {
-                found = true;
-            } else {
-                tmp.add(r);
-            }
-        }
-
-        while(!tmp.isEmpty()) {
-            OpenRequest r = tmp.poll();
-            queue.add(r);
-        }
-        m_openWaitMutex.unlock();
-      
-        return found;
+        return true;
     }
 	
     /**
@@ -322,11 +267,10 @@ public class Connection implements Runnable {
      *  @param host The host to connect to.
      *  @param port The port to connect to.
      */
-    private void connectConnection(String host, int port, String auth) {
-        ++m_attempt;
+    private void connectConnection(String host, int port) {
 		
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", 0, "Connecting, attempt " + m_attempt);
+            DebugHelper.debugPrint("Connection", 0, "Connecting, attempt ");
         }
         
         try {
@@ -349,7 +293,7 @@ public class Connection implements Runnable {
         	
             m_connected = true;
         	
-            connectHandler(auth);
+            connectHandler();
         } catch (UnresolvedAddressException e) {
             destroy(new ChannelError("The host \"" + host + "\" could not be resolved"));
         } catch (IOException e) {
@@ -360,11 +304,11 @@ public class Connection implements Runnable {
     /**
      *  Send HTTP upgrade request.
      */
-    private void connectHandler(String auth) {
+    private void connectHandler() {
         boolean success = false;
 
         try {
-            m_outStream.writeBytes("GET /" + auth + " HTTP/1.1\r\n" +
+            m_outStream.writeBytes("GET / HTTP/1.1\r\n" +
                                    "Connection: upgrade\r\n" +
                                    "Upgrade: winksock/1\r\n" +
                                    "Host: " + m_host);
@@ -635,29 +579,8 @@ public class Connection implements Runnable {
             	
                 try {
                     message = decoder.decode(payload).toString();
-                } catch (CharacterCodingException e) {}
-            }
-        } else if (errcode == Frame.OPEN_REDIRECT) {
-            if (payload == null || payload.capacity() < 4) {
-                destroy(new ChannelError("Expected redirect channel from the server"));
-                return;
-            }
-
-            respch = payload.getInt();
-
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection",     ch, "Redirected from " + ch);
-                DebugHelper.debugPrint("Connection", respch, "             to " + respch);
-            }
-            
-            if (payload != null && payload.capacity() > 4) {
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-        	
-                try {
-                    payload.position(4);
-                    message = decoder.decode(payload).toString();
-                } catch (CharacterCodingException e) {}
+                } catch (CharacterCodingException e) {
+                }
             }
         } else {
             m_pendingMutex.lock();
@@ -683,11 +606,6 @@ public class Connection implements Runnable {
         }
 
         m_openChannelsMutex.lock();
-        if (m_openChannels.containsKey(respch)) {
-            m_openChannelsMutex.unlock();
-            destroy(new ChannelError("Server redirected to open channel"));
-            return;
-        }
 
         m_openChannels.put(respch, channel);
         if (HydnaDebug.HYDNADEBUG) {
@@ -700,40 +618,7 @@ public class Connection implements Runnable {
 
         m_openWaitMutex.lock();
         m_pendingMutex.lock();
-        if (m_openWaitQueue.containsKey(ch)) {
-            Queue<OpenRequest> queue = m_openWaitQueue.get(ch);
-
-            if (queue != null)
-            {
-                // Destroy all pending request IF response wasn't a 
-                // redirected channel.
-                if (respch == ch) {
-                    m_pendingOpenRequests.remove(ch);
-
-                    ChannelError error = new ChannelError("Channel already open");
-
-                    while (!queue.isEmpty()) {
-                        request = queue.poll();
-                        request.getChannel().destroy(error);
-                    }
-
-                    return;
-                }
-
-                request = queue.poll();
-                m_pendingOpenRequests.put(ch, request);
-
-                if (queue.isEmpty()) {
-                    m_openWaitQueue.remove(ch);
-                }
-
-                writeBytes(request.getFrame());
-                request.setSent(true);
-            }
-        } else {
-            m_pendingOpenRequests.remove(ch);
-        }
-
+        m_pendingOpenRequests.remove(ch);
         m_pendingMutex.unlock();
         m_openWaitMutex.unlock();
     }
@@ -912,18 +797,6 @@ public class Connection implements Runnable {
         m_pendingOpenRequests.clear();
         m_pendingMutex.unlock();
 
-        m_openWaitMutex.lock();
-        if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", 0, "Destroying waitQueue of size " + m_openWaitQueue.size());
-        }
-        for (Queue<OpenRequest> queue : m_openWaitQueue.values()) {
-            while(queue != null && !queue.isEmpty()) {
-                queue.poll().getChannel().destroy(error);
-            }
-        }
-        m_openWaitQueue.clear();
-        m_openWaitMutex.unlock();
-
         m_openChannelsMutex.lock();
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Destroying openChannels of size " + m_openChannels.size());
@@ -954,7 +827,7 @@ public class Connection implements Runnable {
         }
 
         String ports = Short.toString(m_port);
-        String key = m_host + ports + m_auth;
+        String key = m_host + ports;
 
         m_connectionMutex.lock();
         if (m_availableConnections.containsKey(key)) {
