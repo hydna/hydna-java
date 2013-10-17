@@ -730,6 +730,28 @@ public class Connection implements Runnable {
              return;
          }
 
+         if (HydnaDebug.HYDNADEBUG) {
+             Charset charset;
+             CharsetDecoder decoder;
+             String content;
+             int pos;
+
+             pos = data.position();
+             charset = Charset.forName("UTF-8");
+             decoder = charset.newDecoder();
+             content = null;
+
+             try {
+                 content = decoder.decode(data).toString();
+             } catch (CharacterCodingException ex) {
+             }
+
+             DebugHelper.debugPrint("Connection",
+                                    channelPtr,
+                                    "received lookup for: '"
+                                        + content + "'");
+         }
+
          path = request.getPath();
          path.position(0);
          data.position(0);
