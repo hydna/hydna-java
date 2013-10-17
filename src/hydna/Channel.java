@@ -187,7 +187,13 @@ public class Channel {
         m_path = url.getPath();
 
         if (m_path.length() == 0 || m_path.charAt(0) != '/') {
-            m_path += "/";
+            m_path = "/" + m_path;
+        }
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   0,
+                                   "Path set to '" + m_path + "'");
         }
 
         try {
@@ -266,12 +272,16 @@ public class Channel {
     /**
      *  Pop the next ChannelEvent in the event queue. The event is
      *  is either a ChannelData instance, a ChannelSignal instance 
-     *  or a ChannelEndSignal instance
+     *  or a ChannelEndSignal instance.
+     *
+     *  The method is blocking until an Event has arrived, if queue
+     *  is empty.
      *
      *  @return The ChannelEvent that was removed from the queue,
      *          or NULL if the queue was empty.
      */
-    public ChannelEvent nextEvent() throws ChannelError {
+    public ChannelEvent nextEvent()
+        throws ChannelError, InterruptedException {
         ChannelEvent event;
         ChannelError error;
 
@@ -283,7 +293,16 @@ public class Channel {
             return event;
         }
 
-        return m_eventQueue.poll();
+        event = m_eventQueue.poll();
+
+        if (event == null) {
+            System.out.println("Waiting for a new event to arrive");
+            m_waitLock.acquire();
+            System.out.println("Unlocked Waiting for a new event to arrive");
+            return nextEvent();
+        }
+
+        return event;
     }
 
     /**
@@ -415,8 +434,22 @@ public class Channel {
      *
      *  @param event The event to add to queue.
      */
-    synchronized void addEvent(ChannelEvent event) {
+    void addEvent(ChannelEvent event) {
+        boolean hasWaitingThread;
+
+        System.out.println("Add event");
+
         m_eventQueue.add(event);
+
+        synchronized (this) {
+            hasWaitingThread = m_waitLock.hasQueuedThreads();
+        }
+
+        if (hasWaitingThread) {
+            System.out.println("Release lock from addEvent");
+            
+            m_waitLock.release();
+        }
     }
 
     /**
