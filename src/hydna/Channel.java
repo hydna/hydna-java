@@ -296,9 +296,7 @@ public class Channel {
         event = m_eventQueue.poll();
 
         if (event == null) {
-            System.out.println("Waiting for a new event to arrive");
             m_waitLock.acquire();
-            System.out.println("Unlocked Waiting for a new event to arrive");
             return nextEvent();
         }
 
@@ -437,8 +435,6 @@ public class Channel {
     void addEvent(ChannelEvent event) {
         boolean hasWaitingThread;
 
-        System.out.println("Add event");
-
         m_eventQueue.add(event);
 
         synchronized (this) {
@@ -446,8 +442,6 @@ public class Channel {
         }
 
         if (hasWaitingThread) {
-            System.out.println("Release lock from addEvent");
-            
             m_waitLock.release();
         }
     }
