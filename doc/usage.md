@@ -12,7 +12,7 @@ the console.
     import java.nio.charset.CharsetDecoder;
 
     import hydna.Channel;
-    import hydna.ChannelData;
+    import hydna.ChannelEvent;
     import hydna.ChannelError;
     import hydna.ChannelMode;
 
@@ -20,34 +20,17 @@ the console.
     * Hello world example
     */
     public class HelloWorld {
-        public static void main(String[] args) throws
-                CharacterCodingException, ChannelError,
-                InterruptedException {
+        public static void main(String[] args)
+            throws ChannelError, InterruptedException {
+
             Channel channel = new Channel();
-            channel.connect("localhost/x11221133", ChannelMode.READWRITE);
+            channel.connect("public.hydna.net", ChannelMode.READWRITE);
 
-            while(!channel.isConnected()) {
-                channel.checkForChannelError();
-                Thread.sleep(1000);
-            }
+            channel.send("Hello World");
+            ChannelEvent event = channel.nextEvent();
 
-            channel.writeString("Hello World");
+            System.our.println(event.getString());
 
-            for (;;) {
-                if (!channel.isDataEmpty()) {
-                    ChannelData data = channnel.popData();
-                    ByteBuffer payload = data.getContent();
-
-                    Charset charset = Charset.forName("US-ASCII");
-                    CharsetDecoder decoder = charset.newDecoder();
-                    String m = decoder.decode(payload).toString();
-                    System.out.println(m);
-                                
-                    break;
-                } else {
-                    channel.checkForChannelError();
-                }
-            }
             channel.close();
         }
     }
