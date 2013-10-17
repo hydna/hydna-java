@@ -1,15 +1,15 @@
-package hydna.examples;
+package com.hydna.examples;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 
-import hydna.Channel;
-import hydna.ChannelEvent;
-import hydna.ChannelData;
-import hydna.ChannelError;
-import hydna.ChannelMode;
+import com.hydna.Channel;
+import com.hydna.ChannelEvent;
+import com.hydna.ChannelData;
+import com.hydna.ChannelError;
+import com.hydna.ChannelMode;
 
 /**
  *  Listener example

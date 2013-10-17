@@ -1,10 +1,10 @@
-package hydna.examples;
+package com.hydna.examples;
 
-import hydna.Channel;
-import hydna.ChannelEvent;
-import hydna.ChannelData;
-import hydna.ChannelError;
-import hydna.ChannelMode;
+import com.hydna.Channel;
+import com.hydna.ChannelEvent;
+import com.hydna.ChannelData;
+import com.hydna.ChannelError;
+import com.hydna.ChannelMode;
 
 /**
  *  Hello world example

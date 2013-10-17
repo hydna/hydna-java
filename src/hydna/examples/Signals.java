@@ -1,12 +1,12 @@
-package hydna.examples;
+package com.hydna.examples;
 
 import java.nio.ByteBuffer;
 
-import hydna.Channel;
-import hydna.ChannelError;
-import hydna.ChannelMode;
-import hydna.ChannelEvent;
-import hydna.ChannelSignal;
+import com.hydna.Channel;
+import com.hydna.ChannelError;
+import com.hydna.ChannelMode;
+import com.hydna.ChannelEvent;
+import com.hydna.ChannelSignal;
 
 /**
  *  Signal example

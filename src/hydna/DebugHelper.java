@@ -1,4 +1,4 @@
-package hydna;
+package com.hydna;
 
 public class DebugHelper {
     public static void debugPrint(String c, int ch, String msg) {

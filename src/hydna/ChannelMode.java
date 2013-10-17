@@ -1,4 +1,4 @@
-package hydna;
+package com.hydna;
 
 public class ChannelMode {
     public static final int LISTEN = 0x00;

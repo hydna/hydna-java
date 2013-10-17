@@ -1,4 +1,4 @@
-package hydna;
+package com.hydna;
 
 public class ContentType {
     public static final int UTF8 = 0x00;

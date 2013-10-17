@@ -1,4 +1,4 @@
-package hydna;
+package com.hydna;
 
 public class URL {
     private short m_port = 80;

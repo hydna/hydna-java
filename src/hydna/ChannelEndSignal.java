@@ -1,4 +1,4 @@
-package hydna;
+package com.hydna;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
