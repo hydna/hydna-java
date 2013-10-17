@@ -32,8 +32,6 @@ public class Connection implements Runnable {
 
     private static Map<String, Connection> m_availableConnections;
 
-    private Lock m_destroyingMutex = new ReentrantLock();
-
     private boolean m_connecting = false;
     private boolean m_connected = false;
     private boolean m_handshaked = false;
@@ -126,9 +124,16 @@ public class Connection implements Runnable {
         if (isDestroying()) {
             throw new ChannelError("Unable to alloc, connection is closing");
         }
-        
+
+        synchronized (this) {
+            m_channelRefCount++;
+        }
+
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", 0, "Allocating a new channel, channel ref count is " + m_channelRefCount);
+            DebugHelper.debugPrint("Connection", 0,
+                                   "Allocating a new channel," +
+                                   "channel ref count is " +
+                                   m_channelRefCount);
         }
     }
 	
@@ -169,6 +174,13 @@ public class Connection implements Runnable {
     private void checkRefCount() {
 
         synchronized (this) {
+
+            if (HydnaDebug.HYDNADEBUG) {
+                DebugHelper.debugPrint("Connection",
+                                       0,
+                                       "RefCount:" + m_channelRefCount);
+            }
+
             if (m_channelRefCount != 0) {
                 return;
             }            
@@ -185,28 +197,31 @@ public class Connection implements Runnable {
         }
     }
 
-
     /**
      *  Request to open a channel.
      *
      *  @param request The request to open the channel.
-     *  @return True if request went well, else false.
      */
-    boolean requestOpen(OpenRequest request) throws ChannelError {
-        int chcomp = request.getChannelId();
-        Channel channel;
+    void requestOpen(OpenRequest request) throws ChannelError {
+        String path;
 
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", chcomp, "A channel is trying to send a new open request");
+            DebugHelper.debugPrint("Connection",
+                                   0,
+                                   "A channel is trying to send a new request");
         }
 
-        if (m_openChannels.containsKey(chcomp)) {
+        path = request.getChannel().getPath();
+
+        if (getChannelByPath(path) != null) {
             throw new ChannelError("Channel already open");
         }
 
         try {
-            if (!m_handshaked) {
-                connectConnection(m_host, m_port);
+            synchronized (this) {
+                if (!m_handshaked) {
+                    connectConnection(m_host, m_port);
+                }
             }
         } catch (ChannelError e) {
             throw e;
@@ -215,12 +230,21 @@ public class Connection implements Runnable {
         synchronized (this) {
             m_pendingOpenRequest = request;
         }
-
-        writeBytes(request.getFrame());
-
-        return true;
     }
 
+    private Channel getChannelByPath(String path) {
+        Iterator<Channel> it;
+        Channel channel;
+
+        it = m_openChannels.values().iterator();
+        while (it.hasNext()) {
+            channel = it.next();
+            if (channel.getPath() == path) {
+                return channel;
+            }
+        }
+        return null;
+    }
 	
     /**
      *  Connect the connection.
@@ -454,6 +478,9 @@ public class Connection implements Runnable {
 
             switch (op) {
 
+                case Frame.KEEPALIVE:
+                break;
+
                 case Frame.OPEN:
                 if (HydnaDebug.HYDNADEBUG) {
                     DebugHelper.debugPrint("Connection",
@@ -479,6 +506,15 @@ public class Connection implements Runnable {
                                            "Received signal");
                 }
                 processSignalFrame(channelPtr, ctype, flag, data);
+                break;
+
+                case Frame.RESOLVE:
+                if (HydnaDebug.HYDNADEBUG) {
+                    DebugHelper.debugPrint("Connection",
+                                           channelPtr,
+                                           "Received Resolve");
+                }
+                processResolveFrame(channelPtr, ctype, flag, data);
                 break;
             }
 
@@ -667,7 +703,47 @@ public class Connection implements Runnable {
             processSignalFrame(channel, ctype, flag, data);
         }
     }
-	
+
+    private void processResolveFrame(int channelPtr,
+                                     int ctype,
+                                     int flag,
+                                     ByteBuffer data) {
+        OpenRequest request;
+        Channel channel;
+        ChannelError error;
+        ByteBuffer path;
+
+         synchronized (this) {
+             request = m_pendingOpenRequest;
+         }
+
+         if (request == null) {
+             destroy(new ChannelError("The server sent a invalid resolve"));
+             return;
+         }
+
+         channel = request.getChannel();
+
+         if (flag != Frame.OPEN_ALLOW) {
+             error = new ChannelError("Unable to resolve path");
+             channel.destroy(error);
+             return;
+         }
+
+         path = request.getPath();
+         path.position(0);
+         data.position(0);
+
+         if (data.equals(path) == false) {
+             error = new ChannelError("Bad path sent by server");
+             channel.destroy(error);
+             return;
+         }
+
+         request.setChannelPtr(channelPtr);
+         channel.resolveSuccess();
+    }
+
     /**
      *  Destroy the connection.
      *
@@ -676,10 +752,16 @@ public class Connection implements Runnable {
     private void destroy(ChannelError error) {
 
         if (HydnaDebug.HYDNADEBUG) {
+            String message = "clean shutdown";
+
+            if (error != null) {
+                message = error.getMessage();
+            }
+
             DebugHelper.debugPrint("Connection",
                                    0,
                                    "Destroying connection because: "
-                                       + error.getMessage());
+                                       + message);
         }
 
         disposeConnection(this);

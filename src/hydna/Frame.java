@@ -7,10 +7,11 @@ class Frame {
     static final short HEADER_SIZE = 0x07;
 
     // Opcodes
-    static final int NOOP   = 0x00;
-    static final int OPEN   = 0x01;
-    static final int DATA   = 0x02;
+    static final int KEEPALIVE = 0x00;
+    static final int OPEN = 0x01;
+    static final int DATA = 0x02;
     static final int SIGNAL = 0x03;
+    static final int RESOLVE = 0x04;
 
     // Open Flags
     static final int OPEN_ALLOW = 0x0;

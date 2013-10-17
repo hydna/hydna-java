@@ -34,7 +34,7 @@ public class ChannelEvent {
      *  @return Boolean true if content is flagged as Binary
      */
     public boolean isBinaryContent() {
-        return m_ctype == ContentType.UTF8;
+        return m_ctype == ContentType.BINARY;
     }
 
     /**
@@ -43,7 +43,7 @@ public class ChannelEvent {
      *  @return Boolean true if content is flagged as UTF-8
      */
     public boolean isUtf8Content() {
-        return m_ctype == ContentType.BINARY;
+        return m_ctype == ContentType.UTF8;
     }
 
     /**
@@ -51,7 +51,7 @@ public class ChannelEvent {
      *
      *  @return The content.
      */
-    public ByteBuffer getContent() {
+    public ByteBuffer getData() {
         return m_data;
     }
 
@@ -62,10 +62,10 @@ public class ChannelEvent {
      *  @return The content or null if not of type UTF-8.
      */
     public String getString() {
-        int pos;
         Charset charset;
         CharsetDecoder decoder;
         String content;
+        int pos;
 
         if (isUtf8Content() == false) {
             return null;

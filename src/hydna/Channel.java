@@ -20,6 +20,7 @@ import java.util.concurrent.Semaphore;
 public class Channel {
 
     private int m_channelPtr = 0;
+    private String m_path;
 
     private Connection m_connection = null;
     private boolean m_connected = false;
@@ -41,6 +42,15 @@ public class Channel {
      */
     public Channel() {
         m_eventQueue = new ConcurrentLinkedQueue<ChannelEvent>();
+    }
+
+    /**
+     *  Get the underlying Path for this Channel
+     *
+     *  @return The path of this Channel.
+     */
+    synchronized public String getPath() {
+        return m_path;
     }
 	
     /**
@@ -124,11 +134,13 @@ public class Channel {
      */
     public ChannelEvent connect(String urlExpr, int mode)
         throws ChannelError, InterruptedException {
+        Connection connection;
         Frame frame;
         OpenRequest request;
         ChannelEvent openEvent;
         ChannelError error;
         ByteBuffer token = null;
+        ByteBuffer path = null;
   
         synchronized (this) {
             if (m_connection != null) {
@@ -172,36 +184,25 @@ public class Channel {
             throw new Error(url.getError());
         }
 
-        chs = url.getPath();
+        m_path = url.getPath();
 
-        if (chs.length() == 0 ||
-        (chs.length() == 1 && chs.charAt(0) == '/')) {
-            chs = "1";
+        if (m_path.length() == 0 || m_path.charAt(0) != '/') {
+            m_path += "/";
         }
 
-        // Take out the channel
-        pos = chs.lastIndexOf("x");
-        if (pos != -1) {
-            try {
-                ch = Integer.parseInt(chs.substring(pos + 1), 16);
-            } catch (NumberFormatException e) {
-                throw new ChannelError("Could not read the channel \"" + chs.substring(pos + 1) + "\"");
-            }
-        } else {
-            try {
-                ch = Integer.parseInt(chs, 10);
-            } catch (NumberFormatException e) {
-                throw new ChannelError("Could not read the channel \"" + chs + "\""); 
-            }
+        try {
+            path = ByteBuffer.wrap(m_path.getBytes("US-ASCII"));
+        } catch (UnsupportedEncodingException e) {
+            throw new ChannelError("Unable to encode path");
         }
 
         tokens = url.getToken();
-        m_channelPtr = ch;
 
-        m_connection = Connection.getConnection(url.getHost(), url.getPort());
-  
+        connection = Connection.getConnection(url.getHost(), url.getPort());
+        m_connection = connection;
+
         // Ref count
-        m_connection.allocChannel();
+        connection.allocChannel();
 
         if (tokens != "") {
             try {
@@ -211,19 +212,52 @@ public class Channel {
             }
         }
  
-        request = new OpenRequest(this, m_channelPtr, mode, token);
+        request = new OpenRequest(this, path, mode, token);
 
-        m_connection.requestOpen(request);
+        connection.requestOpen(request);
 
-        System.out.println("lock acquire");
+        connection.writeBytes(request.getResolveFrame());
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   0,
+                                   "Acquire waitLock");
+        }
+
         m_waitLock.acquire();
-        System.out.println("unlock acquire");
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   0,
+                                   "release waitLock");
+        }
+
+        if ((error = resetError()) != null) {
+            throw error;
+        }
+
+        connection.writeBytes(request.getFrame());
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   0,
+                                   "Acquire waitLock after resolve");
+        }
+
+        m_waitLock.acquire();
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   getChannelPtr(),
+                                   "Release waitLock after resolve");
+        }
 
         if ((error = resetError()) != null) {
             throw error;
         }
 
         openEvent = m_openEvent;
+
         m_openEvent = null;
 
         return openEvent;
@@ -268,7 +302,7 @@ public class Channel {
             return true;
         }
 
-        return m_eventQueue.isEmpty() != false;
+        return m_eventQueue.isEmpty() != true;
     }
 
     /**
@@ -382,9 +416,6 @@ public class Channel {
      *  @param event The event to add to queue.
      */
     synchronized void addEvent(ChannelEvent event) {
-        if (m_eventQueue == null) {
-            return;
-        }
         m_eventQueue.add(event);
     }
 
@@ -436,13 +467,16 @@ public class Channel {
      *  @param ctype The ContentType
      *  @param payload Optional payload
      */
-    synchronized protected void openSuccess(int channelPtr,
-                                            int ctype,
-                                            ByteBuffer data) {
+    synchronized void openSuccess(int channelPtr,
+                                  int ctype,
+                                  ByteBuffer data) {
         m_channelPtr = channelPtr;
         m_connected = true;
         m_openEvent = new ChannelData(this, ctype, 0, data);
-        System.out.println("openSuccess");
+        m_waitLock.release();
+    }
+
+    void resolveSuccess() {
         m_waitLock.release();
     }
 
@@ -490,7 +524,6 @@ public class Channel {
 
         m_eventQueue.clear();
 
-        System.out.println("release m_openCLose");
         m_waitLock.release();
     }
 
