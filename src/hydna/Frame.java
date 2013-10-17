@@ -3,40 +3,54 @@ package hydna;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-public class Frame {
-    public static final short HEADER_SIZE = 0x07;
-	
+class Frame {
+    static final short HEADER_SIZE = 0x07;
+
     // Opcodes
-    public static final int NOOP   = 0x00;
-    public static final int OPEN   = 0x01;
-    public static final int DATA   = 0x02;
-    public static final int SIGNAL = 0x03;
-    
+    static final int NOOP   = 0x00;
+    static final int OPEN   = 0x01;
+    static final int DATA   = 0x02;
+    static final int SIGNAL = 0x03;
+
     // Open Flags
-    public static final int OPEN_ALLOW = 0x0;
-    public static final int OPEN_REDIRECT = 0x1;
-    public static final int OPEN_DENY = 0x7;
+    static final int OPEN_ALLOW = 0x0;
+    static final int OPEN_REDIRECT = 0x1;
+    static final int OPEN_DENY = 0x7;
 
     // Signal Flags
-    public static final int SIG_EMIT = 0x0;
-    public static final int SIG_END = 0x1;
-    public static final int SIG_ERROR = 0x7;
+    static final int SIG_EMIT = 0x0;
+    static final int SIG_END = 0x1;
+    static final int SIG_ERROR = 0x7;
+
+    // Bit masks
+    static int FLAG_BITMASK = 0x7;
+
+    static int OP_BITPOS = 3;
+    static int OP_BITMASK = (0x7 << OP_BITPOS);
+
+    static int CTYPE_BITPOS = 6;
+    static int CTYPE_BITMASK = (0x1 << CTYPE_BITPOS);
     
+
     // Upper payload limit (10kb)
-    public static final int PAYLOAD_MAX_LIMIT = 10 * 1024;
+    static final int PAYLOAD_MAX_LIMIT = 0xFFFFFF - HEADER_SIZE;
 	
     private ByteBuffer m_bytes;
 	
-    public Frame(int ch, int op, int flag, ByteBuffer payload) {
+    public Frame(int channelPtr,
+                 int ctype,
+                 int op,
+                 int flag,
+                 ByteBuffer data) {
         super();
 		
         short length = HEADER_SIZE;
 		
-        if (payload != null) {
-            if (payload.capacity() > PAYLOAD_MAX_LIMIT) {
+        if (data != null) {
+            if (data.capacity() > PAYLOAD_MAX_LIMIT) {
                 throw new IllegalArgumentException("Payload max limit reached");
             } else {
-                length += (short)(payload.capacity());
+                length += (short)(data.capacity());
             }
         }
 		
@@ -44,25 +58,29 @@ public class Frame {
         m_bytes.order(ByteOrder.BIG_ENDIAN);
 		
         m_bytes.putShort(length);
-        m_bytes.putInt(ch);
-        m_bytes.put((byte) ((op & 3) << 3 | (flag & 7)));
+        m_bytes.putInt(channelPtr);
+        m_bytes.put((byte)((ctype << CTYPE_BITPOS) | (op << OP_BITPOS) | flag));
 		
-        if (payload != null) {
-            m_bytes.put(payload);
+        if (data != null) {
+            m_bytes.put(data);
         }
 		
         m_bytes.flip();
     }
 	
-    public Frame(int ch, int op, int flag) {
-        this(ch, op, flag, null);
+    public static Frame create(int channelPtr, int ctype, int op, int flag) {
+        return new Frame(channelPtr, ctype, op, flag, null);
+    }
+
+    public static Frame create(int channelPtr,
+                               int ctype,
+                               int op,
+                               int flag,
+                               ByteBuffer data) {
+        return new Frame(channelPtr, ctype, op, flag, data);
     }
 	
-    public ByteBuffer getData() {
+    ByteBuffer getData() {
         return m_bytes;
-    }
-	
-    void setChannel (int value) {
-        m_bytes.putInt(3, value);
     }
 }

@@ -8,43 +8,39 @@ import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+
 
 /**
-*  This class is used as an interface to the library.
-*  A user of the library should use an instance of this class
-*  to communicate with a server.
-*/
+ *  This class is used as an interface to the library.
+ *  A user of the library should use an instance of this class
+ *  to communicate with a server.
+ */
 public class Channel {
 
-    private int m_ch = 0;
-    private String m_message = "";
-	
+    private int m_channelPtr = 0;
+
     private Connection m_connection = null;
     private boolean m_connected = false;
     private boolean m_closing = false;
-    private Frame m_pendingClose;
-	
-    private boolean m_readable = false;
-    private boolean m_writable = false;
-    private boolean m_emitable = false;
-	
-    private ChannelError m_error = new ChannelError("", 0x0);
-	
+
     private int m_mode;
-    private OpenRequest m_openRequest = null;
-    private OpenRequest m_pendingRequest = null;
-	
-    private Queue<ChannelData> m_dataQueue = new LinkedList<ChannelData>();
-    private Queue<ChannelSignal> m_signalQueue = new LinkedList<ChannelSignal>();
-	
-    private Lock m_dataMutex = new ReentrantLock();
-    private Lock m_signalMutex = new ReentrantLock();
-    private Lock m_connectMutex = new ReentrantLock();
-	
+
+    private Queue<ChannelSignal> m_signalQueue;
+    private Queue<ChannelEvent> m_eventQueue = null;
+
+    private ChannelEvent m_openEvent = null;
+    private ChannelEvent m_endEvent = null;
+    private ChannelError m_error = null;
+
+    private final Semaphore m_waitLock = new Semaphore(0, true);
+
     /**
      *  Initializes a new Channel instance
      */
     public Channel() {
+        m_eventQueue = new ConcurrentLinkedQueue<ChannelEvent>();
     }
 	
     /**
@@ -52,11 +48,8 @@ public class Channel {
      *
      *  @return The connected state.
      */
-    public boolean isConnected() {
-        m_connectMutex.lock();
-        boolean result = m_connected;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean isConnected() {
+        return m_connected;
     }
 
     /**
@@ -64,11 +57,8 @@ public class Channel {
      *
      *  @return The closing state.
      */
-    public boolean isClosing() {
-        m_connectMutex.lock();
-        boolean result = m_closing;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean isClosing() {
+        return m_closing;
     }
 
     /**
@@ -76,11 +66,10 @@ public class Channel {
      *
      *  @return True if channel is readable.
      */
-    public boolean isReadable() {
-        m_connectMutex.lock();
-        boolean result = m_connected && m_readable;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean isReadable() {
+        return m_connected &&
+               m_closing == false &&
+               ((m_mode & ChannelMode.READ) == ChannelMode.READ);
     }
 
     /**
@@ -88,11 +77,10 @@ public class Channel {
      *
      *  @return True if channel is writable.
      */
-    public boolean isWritable() {
-        m_connectMutex.lock();
-        boolean result = m_connected && m_writable;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean isWritable() {
+        return m_connected &&
+               m_closing == false &&
+               ((m_mode & ChannelMode.WRITE) == ChannelMode.WRITE);
     }
 
     /**
@@ -100,84 +88,70 @@ public class Channel {
      *
      *  @return True if channel has signal support.
      */
-    public boolean hasSignalSupport() {
-        m_connectMutex.lock();
-        boolean result = m_connected && m_emitable;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean isEmitable() {
+        return m_connected &&
+               m_closing == false &&
+               ((m_mode & ChannelMode.EMIT) == ChannelMode.EMIT);
     }
 
     /**
-     *  Returns the channel that this instance listen to.
+     *  Checks if the channel has an Error attached
      *
-     *  @return The channel.
+     *  @return True if channel has an Error attached.
      */
-    public int getChannel() {
-        m_connectMutex.lock();
-        int result = m_ch;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean hasError() {
+        return !(m_error == null);
     }
 
     /**
-     *  Returns the message received when connected.
+     *  Checks if the channel has a pending end signal attached
      *
-     *  @return The welcome message.
+     *  @return True if channel has a pendning end signal attached.
      */
-    public String getMessage() {
-        m_connectMutex.lock();
-        String result = m_message;
-        m_connectMutex.unlock();
-        return result;
+    synchronized public boolean hasEndSignal() {
+        return !(m_endEvent == null);
     }
 
-    /**
-     *  Resets the error.
-     *  
-     *  Connects the channel to the specified channel. If the connection fails 
-     *  immediately, an exception is thrown.
-     *
-     *  @param expr The channel to connect to,
-     *  @param mode The mode in which to open the channel.
-     */
-    public void connect(String expr, int mode) throws ChannelError {
-        connect(expr, mode, null);
-    }
+
 
     /**
-     *  Resets the error.
-     *  
-     *  Connects the channel to the specified channel. If the connection fails 
-     *  immediately, an exception is thrown.
+     *  Connects the channel to the specified channel. If the connection 
+     *  fails, an exception is thrown.
      *
-     *  @param expr The channel to connect to,
+     *  @param urlExpr The URL to connect to,
      *  @param mode The mode in which to open the channel.
      *  @param token An optional token.
      */
-    public void connect(String expr, int mode, ByteBuffer token) throws ChannelError {
+    public ChannelEvent connect(String urlExpr, int mode)
+        throws ChannelError, InterruptedException {
         Frame frame;
         OpenRequest request;
+        ChannelEvent openEvent;
+        ChannelError error;
+        ByteBuffer token = null;
   
-        m_connectMutex.lock();
-        if (m_connection != null) {
-            m_connectMutex.unlock();
-            throw new ChannelError("Already connected");
+        synchronized (this) {
+            if (m_connection != null) {
+                throw new ChannelError("Already connected");
+            }
+
+            if (m_closing) {
+                throw new ChannelError("Channel is closing");
+            }
         }
-        m_connectMutex.unlock();
 
         if (mode == 0x04 ||
             mode < ChannelMode.READ || 
-        mode > ChannelMode.READWRITEEMIT) {
+            mode > ChannelMode.READWRITEEMIT) {
             throw new ChannelError("Invalid channel mode");
         }
   
+        m_error = null;
+        m_endEvent = null;
+  
         m_mode = mode;
   
-        m_readable = ((m_mode & ChannelMode.READ) == ChannelMode.READ);
-        m_writable = ((m_mode & ChannelMode.WRITE) == ChannelMode.WRITE);
-        m_emitable = ((m_mode & ChannelMode.EMIT) == ChannelMode.EMIT);
-
-        URL url = URL.parse(expr);
+        URL url = URL.parse(urlExpr);
         String tokens = "";
         String chs = "";
         int ch;
@@ -222,112 +196,340 @@ public class Channel {
         }
 
         tokens = url.getToken();
-        m_ch = ch;
+        m_channelPtr = ch;
 
         m_connection = Connection.getConnection(url.getHost(), url.getPort());
   
         // Ref count
         m_connection.allocChannel();
 
-        if (token != null || tokens == "") {
-            frame = new Frame(m_ch, Frame.OPEN, mode, token);
-        } else {
-            frame = new Frame(m_ch, Frame.OPEN, mode, ByteBuffer.wrap(tokens.getBytes()));
+        if (tokens != "") {
+            try {
+                token = ByteBuffer.wrap(tokens.getBytes("UTF-8"));
+            } catch (UnsupportedEncodingException e) {
+                throw new ChannelError("Unable to encode token data");
+            }
         }
-  
-        request = new OpenRequest(this, m_ch, frame);
+ 
+        request = new OpenRequest(this, m_channelPtr, mode, token);
 
-        m_error = new ChannelError("", 0x0);
-  
-        if (!m_connection.requestOpen(request)) {
-            checkForChannelError();
-            throw new ChannelError("Channel already open");
+        m_connection.requestOpen(request);
+
+        System.out.println("lock acquire");
+        m_waitLock.acquire();
+        System.out.println("unlock acquire");
+
+        if ((error = resetError()) != null) {
+            throw error;
         }
 
-        m_openRequest = request;
+        openEvent = m_openEvent;
+        m_openEvent = null;
+
+        return openEvent;
     }
 
     /**
-        *  Sends data to the channel.
-        *
-        *  @param data The data to write to the channel.
-        *  @param priority The priority of the data.
-        */
-    public void writeBytes(ByteBuffer data, int priority) throws ChannelError {
-        writeBytes(data, priority, 0);
-    }
-
-    /**
-     *  Sends data to the channel.
+     *  Pop the next ChannelEvent in the event queue. The event is
+     *  is either a ChannelData instance, a ChannelSignal instance 
+     *  or a ChannelEndSignal instance
      *
-     *  @param data The data to write to the channel.
+     *  @return The ChannelEvent that was removed from the queue,
+     *          or NULL if the queue was empty.
      */
-    public void writeBytes(ByteBuffer data) throws ChannelError {
-        writeBytes(data, 0, 0);
+    public ChannelEvent nextEvent() throws ChannelError {
+        ChannelEvent event;
+        ChannelError error;
+
+        if ((error = resetError()) != null) {
+            throw error;
+        }
+
+        if ((event = resetEndEvent()) != null) {
+            return event;
+        }
+
+        return m_eventQueue.poll();
     }
 
     /**
-     *  Sends an UTF8 string to the channel.
+     *  Checks if the event queue is empty. This function also returns
+     *  true if their is an error pending.
      *
-     *  @param value The string to be sent.
-     *  @param priority The priority of the data.
+     *  @return True is the queue is empty or if there is a channel error.
      */
-    public void writeString(String value) throws ChannelError {
-        writeString(value, 0);
+    public boolean hasEvents() {
+
+        if (hasError()) {
+            return true;
+        }
+
+        if (hasEndSignal()) {
+            return true;
+        }
+
+        return m_eventQueue.isEmpty() != false;
     }
 
-
     /**
-     *  Sends string data to the channel.
+     *  Sends a UTF8 data message to the channel with priority 0.
      *
-     *  @param value The string to be sent.
+     *  @param data The payload to write to the channel.
      */
-    public void writeString(String value, int priority) throws ChannelError {
+    public boolean send(String message) throws ChannelError {
+        ByteBuffer data;
         try {
-            ByteBuffer payload = ByteBuffer.wrap(value.getBytes("UTF-8"));
-            writeBytes(payload, priority, 1);
-        } catch (UnsupportedEncodingException ex) {
+            data = ByteBuffer.wrap(message.getBytes("UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+            throw new ChannelError("Unable to encode payload");
         }
+        return send(ContentType.UTF8, 0, data);
     }
 
     /**
-     *  Sends data to the channel.
+     *  Sends a UTF8 data message to the channel with specified priority.
+     *
+     *  @param data The payload to write to the channel.
+     *  @param priority The priority of the payload.
+     */
+    public boolean send(String message, int priority) throws ChannelError {
+        ByteBuffer data;
+        try {
+            data = ByteBuffer.wrap(message.getBytes("UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+            throw new ChannelError("Unable to encode payload");
+        }
+        return send(ContentType.BINARY, priority, data);
+    }
+
+    /**
+     *  Sends a binary data message to the channel with priority 0.
+     *
+     *  @param data The payload to write to the channel.
+     */
+    public boolean send(ByteBuffer data) throws ChannelError {
+        return send(ContentType.BINARY, 0, data);
+    }
+
+    /**
+     *  Sends a binary data message with specified priority.
+     *
+     *  @param data The payload to write to the channel.
+     *  @param priority The priority of the payload.
+     */
+    public boolean send(ByteBuffer data, int priority) throws ChannelError {
+        return send(ContentType.BINARY, priority, data);
+    }
+
+    /**
+     *  Sends UTF8 signal to the channel.
      *
      *  @param data The data to write to the channel.
-     *  @param priority The priority of the data.
+     *  @param type The type of the signal.
      */
-    private void writeBytes(ByteBuffer data, int priority, int type)
-            throws ChannelError {
-        boolean result;
-        int flag;
-
-        m_connectMutex.lock();
-        if (!m_connected || m_connection == null) {
-            m_connectMutex.unlock();
-            checkForChannelError();
-            throw new ChannelError("Channel is not connected");
+    public boolean emit(String message) throws ChannelError {
+        ByteBuffer data;
+        try {
+            data = ByteBuffer.wrap(message.getBytes("UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+            throw new ChannelError("Unable to encode payload");
         }
-        m_connectMutex.unlock();
+        return emit(ContentType.UTF8, data);
+    }
 
-        if (!m_writable) {
-            throw new ChannelError("Channel is not writable");
+    /**
+     *  Sends a binary signal to the channel.
+     *
+     *  @param data The data to write to the channel.
+     *  @param type The type of the signal.
+     */
+    public boolean emit(ByteBuffer data) throws ChannelError {
+        return emit(ContentType.BINARY, data);
+    }
+
+    /**
+     *  Closes the Channel instance without any message.
+     */
+    public void close() throws ChannelError, InterruptedException {
+        close(ContentType.UTF8, null);
+    }
+
+    /**
+     *  Closes the Channel instance with a UTF8 message.
+     */
+    public void close(String message)
+        throws ChannelError, InterruptedException {
+        ByteBuffer data;
+        try {
+            data = ByteBuffer.wrap(message.getBytes("UTF-8"));
+        } catch (UnsupportedEncodingException e) {
+            throw new ChannelError("Unable to encode payload");
         }
+        close(ContentType.UTF8, data);
+    }
 
-        if (priority > 3 || priority < 0) {
-            throw new ChannelError("Priority must be between 0 - 3");
+    /**
+     *  Closes the Channel instance with a binary message.
+     */
+    public void close(ByteBuffer data)
+        throws ChannelError, InterruptedException {
+        close(ContentType.BINARY, data);
+    }
+
+    /**
+     *  Add an Event to the event queue.
+     *
+     *  @param event The event to add to queue.
+     */
+    synchronized void addEvent(ChannelEvent event) {
+        if (m_eventQueue == null) {
+            return;
         }
+        m_eventQueue.add(event);
+    }
 
-        flag = priority << 1 | type;
+    /**
+     *  Returns the channel that this instance listen to.
+     *
+     *  @return The channel.
+     */
+    synchronized int getChannelPtr() {
+        return m_channelPtr;
+    }
 
-        Frame frame = new Frame(m_ch, Frame.DATA, flag, data);
-  
-        m_connectMutex.lock();
+    /**
+     *  Resets the error
+     *
+     *  @return The Error attached to the channel instance.
+     */
+    synchronized ChannelError resetError() {
+        ChannelError error = m_error;
+        m_error = null;
+        return error;
+    }
+
+    /**
+     *  Resets current end event
+     *
+     *  @return The end signal attached to the channel instance.
+     */
+    synchronized ChannelEvent resetEndEvent() {
+        ChannelEvent event = m_endEvent;
+        m_endEvent = null;
+        return event;
+    }
+
+    /**
+     *  Get the underlying connection to this channel instance
+     *
+     *  @return The underlying connection
+     */
+    synchronized Connection getUnderlyingConnection() {
+        return m_connection;
+    }
+
+    /**
+     *  Internal callback for open success.
+     *  Used by the Connection class.
+     *
+     *  @param ch The channel pointer.
+     *  @param ctype The ContentType
+     *  @param payload Optional payload
+     */
+    synchronized protected void openSuccess(int channelPtr,
+                                            int ctype,
+                                            ByteBuffer data) {
+        m_channelPtr = channelPtr;
+        m_connected = true;
+        m_openEvent = new ChannelData(this, ctype, 0, data);
+        System.out.println("openSuccess");
+        m_waitLock.release();
+    }
+
+    synchronized void destroy(ChannelError error) {
+        destroy(error, null);
+    }
+
+    synchronized void destroy(ChannelSignal event) {
+        destroy(null, event);
+    }
+
+    /**
+     *  Internally destroy channel.
+     *
+     *  @param error The cause of the destroy.
+     */
+    synchronized void destroy(ChannelError error,
+                              ChannelSignal event) {
         Connection connection = m_connection;
-        m_connectMutex.unlock();
-        result = connection.writeBytes(frame);
+        boolean connected = m_connected;
+        int channelPtr = m_channelPtr;
+        boolean closing = m_closing;
+        Frame frame;
 
-        if (!result)
-            checkForChannelError();
+        m_channelPtr = 0;
+        m_connected = false;
+        m_connection = null;
+
+        if (connection != null) {
+
+            // Tell server that we received the end signal
+            if (event != null && closing == false) {
+                frame = Frame.create(channelPtr,
+                                     ContentType.UTF8,
+                                     Frame.SIGNAL,
+                                     Frame.SIG_END);
+                connection.writeBytes(frame);
+            }
+
+            connection.deallocChannel(connected ? channelPtr : 0);
+        }
+
+        m_error = error;
+        m_endEvent = event;
+
+        m_eventQueue.clear();
+
+        System.out.println("release m_openCLose");
+        m_waitLock.release();
+    }
+
+    /**
+     *  Sends a binary data message with specified priority and ContentType.
+     *
+     *  @param ctype The ContentType of the payload
+     *  @param priority The priority of the payload.
+     *  @param data The payload to write to the channel.
+     */
+    private boolean send(int ctype, int priority, ByteBuffer data)
+        throws ChannelError {
+        Connection connection;
+        Frame frame;
+
+        if (data == null || data.capacity() == 0) {
+            throw new ChannelError("Payload data cannot be zero-length");
+        }
+
+        if (priority < 0 || priority > 7) {
+            throw new ChannelError("Priority must be between 0 - 7");
+        }
+
+        if (isConnected() == false ||
+            (connection = getUnderlyingConnection()) == null) {
+            throw new ChannelError("Not connected");
+        }
+
+        if (isWritable() == false) {
+            throw new ChannelError("You do not have permission to send data");
+        }
+
+        frame = Frame.create(m_channelPtr,
+                             ctype,
+                             Frame.DATA,
+                             priority,
+                             data);
+
+        return connection.writeBytes(frame);
     }
 
     /**
@@ -336,268 +538,79 @@ public class Channel {
      *  @param data The data to write to the channel.
      *  @param type The type of the signal.
      */
-    public void emitBytes(ByteBuffer data) throws ChannelError {
-        boolean result;
+    private boolean emit(int ctype, ByteBuffer data)
+        throws ChannelError {
+        Connection connection;
+        Frame frame;
 
-        m_connectMutex.lock();
-        if (!m_connected || m_connection == null) {
-            m_connectMutex.unlock();
-            checkForChannelError();
-            throw new ChannelError("Channel is not connected.");
+        if (data == null || data.capacity() == 0) {
+            throw new ChannelError("Payload data cannot be zero-length");
         }
-        m_connectMutex.unlock();
 
-        if (!m_emitable) {
+        if (isConnected() == false ||
+            (connection = getUnderlyingConnection()) == null) {
+            throw new ChannelError("Not connected");
+        }
+
+        if (isEmitable() == false) {
             throw new ChannelError("You do not have permission to send signals");
         }
 
-        Frame frame = new Frame(m_ch, Frame.SIGNAL, Frame.SIG_EMIT,
-            data);
+        frame = Frame.create(m_channelPtr,
+                             ctype,
+                             Frame.SIGNAL,
+                             Frame.SIG_EMIT,
+                             data);
 
-        m_connectMutex.lock();
-        Connection connection = m_connection;
-        m_connectMutex.unlock();
-        result = connection.writeBytes(frame);
-
-        if (!result)
-            checkForChannelError();
-    }
-
-    /**
-     *  Sends a string signal to the channel.
-     *
-     *  @param value The string to be sent.
-     *  @param type The type of the signal.
-     */
-    public void emitString(String value) throws ChannelError {
-        emitBytes(ByteBuffer.wrap(value.getBytes()));
+        return connection.writeBytes(frame);
     }
 
     /**
      *  Closes the Channel instance.
      */
-    public void close() {
-        m_connectMutex.lock();
-        if (m_connection == null || m_closing) {
-            m_connectMutex.unlock();
-            return;
-        }
-    
-        m_closing = true;
-        m_readable = false;
-        m_writable = false;
-        m_emitable = false;
-  
-        if (m_openRequest != null && m_connection.cancelOpen(m_openRequest)) {
-            // Open request hasn't been posted yet, which means that it's
-            // safe to destroy channel immediately.
-    	
-            m_openRequest = null;
-            m_connectMutex.unlock();
-    	
-            ChannelError error = new ChannelError("", 0x0);
-            destroy(error);
-            return;
-        }
-    
-        Frame frame = new Frame(m_ch, Frame.SIGNAL, Frame.SIG_END);
-    
-        if (m_openRequest != null) {
-            // Open request is not responded to yet. Wait to send ENDSIG until	
-            // we get an OPENRESP.
-    	
-            m_pendingClose = frame;
-            m_connectMutex.unlock();
-        } else {
-            m_connectMutex.unlock();
-    	
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Channel", m_ch, "Sending close signal");
-            }
-    	
-            m_connectMutex.lock();
-            Connection connection = m_connection;
-            m_connectMutex.unlock();
-            connection.writeBytes(frame);
-    	
-        }
-    }
-
-    /**
-        *  Checks if some error has occurred in the channel
-        *  and throws an exception if that is the case.
-        */
-    public void checkForChannelError() throws ChannelError {
-        m_connectMutex.lock();
-        if (m_error.getCode() != 0x0) {
-            m_connectMutex.unlock();
-            throw m_error;
-        } else {
-            m_connectMutex.unlock();
-        }
-    }
-
-    /**
-     *  Add data to the data queue.
-     *
-     *  @param data The data to add to queue.
-    */
-    protected void addData(ChannelData data) {
-        m_dataMutex.lock();
-        m_dataQueue.add(data);
-        m_dataMutex.unlock();
-    }
-
-    /**
-     *  Pop the next data in the data queue.
-     *
-     *  @return The data that was removed from the queue,
-     *          or NULL if the queue was empty.
-     */
-    public ChannelData popData() {
-        m_dataMutex.lock();
-        ChannelData data = m_dataQueue.poll();
-        m_dataMutex.unlock();
-    
-        return data;
-    }
-
-    /**
-     *  Checks if the signal queue is empty.
-     *
-     *  @return True if the queue is empty.
-     */
-    public boolean isDataEmpty() {
-        m_dataMutex.lock();
-        boolean result = m_dataQueue.isEmpty();
-        m_dataMutex.unlock();
-    
-        return result;
-    }
-
-    /**
-     *  Add signals to the signal queue.
-     *
-     *  @param signal The signal to add to the queue.
-     */
-    protected void addSignal(ChannelSignal signal) {
-        m_signalMutex.lock();
-        m_signalQueue.add(signal);
-        m_signalMutex.unlock();
-    }
-
-    /**
-     *  Pop the next signal in the signal queue.
-     *
-     *  @return The signal that was removed from the queue,
-     *          or NULL if the queue was empty.
-     */
-    public ChannelSignal popSignal() {
-        m_signalMutex.lock();
-        ChannelSignal signal = m_signalQueue.poll();
-        m_signalMutex.unlock();
-
-        return signal;
-    }
-
-    /**
-     *  Checks if the signal queue is empty.
-     *
-     *  @return True is the queue is empty.
-     */
-    public boolean isSignalEmpty() {
-        m_signalMutex.lock();
-        boolean result = m_signalQueue.isEmpty();
-        m_signalMutex.unlock();
-
-        return result;
-    }
-
-
-    synchronized boolean setPendingOpenRequest(OpenRequest request) {
-  
-      if (m_closing) {
-        // Do not allow pending request if we are not closing.
-        return false;
-      }
-
-      if (m_pendingRequest != null) {
-        return m_pendingRequest.getChannel().setPendingOpenRequest(request);
-      }
-
-      m_pendingRequest = request;
-
-      return true;
-    }
-
-
-    /**
-     *  Internal callback for open success.
-     *  Used by the Connection class.
-     *
-     *  @param respch The response channel.
-     */
-    protected void openSuccess(int respch, String message) {
-        m_connectMutex.lock();
-        int origch = m_ch;
+    private void close(int ctype, ByteBuffer data)
+        throws ChannelError, InterruptedException {
+        Connection connection;
         Frame frame;
-	
-        m_openRequest = null;
-        m_ch = respch;
-        m_connected = true;
-        m_message = message;
-  
-        if (m_pendingClose != null) {
-            frame = m_pendingClose;
-            m_pendingClose = null;
-            m_connectMutex.unlock();
-        
-            if (origch != respch) {
-                // channel is changed. We need to change the channel of the
-                //frame before sending to server.
-        	
-                frame.setChannel(respch);
-            }
-        
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Channel", m_ch, "Sending close signal");
-            }
-        
-            m_connectMutex.lock();
-            Connection connection = m_connection;
-            m_connectMutex.unlock();
+        ChannelError error;
+
+        if (isConnected() == false ||
+            (connection = getUnderlyingConnection()) == null) {
+            throw new ChannelError("The channel is not open");
+        }
+
+        m_closing = true;
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   getChannelPtr(),
+                                   "Sending close signal");
+        }
+
+        frame = Frame.create(getChannelPtr(),
+                             ctype,
+                             Frame.SIGNAL,
+                             Frame.SIG_END,
+                             data);
+
+        try {
             connection.writeBytes(frame);
-        } else {
-            m_connectMutex.unlock();
+        } catch (Exception e) {
+            m_connected = false;
+            m_closing = false;
         }
-    }
 
-    /**
-     *  Internally destroy channel.
-     *
-     *  @param error The cause of the destroy.
-     */
-    protected void destroy(ChannelError error) {
-        m_connectMutex.lock();
-        Connection connection = m_connection;
-        boolean connected = m_connected;
-        int ch = m_ch;
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Channel",
+                                   getChannelPtr(),
+                                   "Acquire waitLock");
+        }
 
-        m_ch = 0;
-        m_connected = false;
-        m_writable = false;
-        m_readable = false;
-        m_pendingClose = null;
+        m_waitLock.acquire();
         m_closing = false;
-        m_openRequest = null;
-        m_connection = null;
-  
-        if (connection != null) {
-            connection.deallocChannel(connected ? ch : 0);
-        }
-    
-        m_error = error;
 
-        m_connectMutex.unlock();
+        if ((error = resetError()) != null) {
+            throw error;
+        }
     }
 }

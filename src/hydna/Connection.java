@@ -30,20 +30,17 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class Connection implements Runnable {
 
-    private static Map<String, Connection> m_availableConnections = new HashMap<String, Connection>();
-    private static Lock m_connectionMutex = new ReentrantLock();
+    private static Map<String, Connection> m_availableConnections;
 
     private Lock m_destroyingMutex = new ReentrantLock();
-    private Lock m_closingMutex = new ReentrantLock();
-    private Lock m_listeningMutex = new ReentrantLock();
 
     private boolean m_connecting = false;
     private boolean m_connected = false;
     private boolean m_handshaked = false;
     private boolean m_destroying = false;
-    private boolean m_closing = false;
     private boolean m_listening = false;
 
+    private String m_id;
     private String m_host;
     private short m_port;
 
@@ -52,8 +49,9 @@ public class Connection implements Runnable {
     private DataOutputStream m_outStream;
     private BufferedReader m_inStreamReader;
 
-    private Map<Integer, OpenRequest> m_pendingOpenRequests;
     private Map<Integer, Channel> m_openChannels;
+
+    private OpenRequest m_pendingOpenRequest;
 
     private int m_channelRefCount = 0;
 
@@ -67,52 +65,67 @@ public class Connection implements Runnable {
      *  @param port The port associated with the connection.
      *  @return The connection.
      */
-    public static Connection getConnection(String host, short port) {
+    synchronized static Connection getConnection(String host, short port) {
         Connection connection;
-        String ports = Short.toString(port);
-        String key = host + ports;
-      
-        m_connectionMutex.lock();
-        if (m_availableConnections.containsKey(key)) {
-            connection = m_availableConnections.get(key);
-        } else {
-            connection = new Connection(host, port);
-            m_availableConnections.put(key, connection);
+        String id;
+
+        id = host + Short.toString(port);
+
+        if (m_availableConnections == null) {
+            m_availableConnections = new HashMap<String, Connection>();
         }
-        m_connectionMutex.unlock();
+
+        if (m_availableConnections.containsKey(id)) {
+            connection = m_availableConnections.get(id);
+        } else {
+            connection = new Connection(id, host, port);
+            m_availableConnections.put(id, connection);
+        }
 
         return connection;
     }
-	
+
+
+    synchronized static void disposeConnection(Connection connection) {
+        String id;
+        synchronized (connection) {
+            id = connection.m_id;
+            if (id != null) {
+                connection.m_id = null;
+                if (m_availableConnections.containsKey(id)) {
+                    m_availableConnections.remove(id);
+                }
+            }
+        }
+    }
+
     /**
      *  Initializes a new Channel instance.
      *
      *  @param host The host the connection should connect to.
      *  @param port The port the connection should connect to.
      */
-    public Connection(String host, short port) {
+    public Connection(String id, String host, short port) {
+        m_id = id;
         m_host = host;
         m_port = port;
 
         m_openChannels = new ConcurrentHashMap<Integer, Channel>();
-        m_pendingOpenRequests = new HashMap<Integer, OpenRequest>();
     }
-	
-    /**
-     *  Returns the handshake status of the connection.
-     *
-     *  @return True if the connection has handshaked.
-     */
-    public boolean hasHandShaked() {
-        return m_handshaked;
+
+    synchronized boolean isDestroying() {
+        return m_destroying;
     }
-	
+
     /**
      * Method to keep track of the number of channels that is associated 
      * with this connection instance.
      */
-    synchronized void allocChannel() {
-        m_channelRefCount++;
+    void allocChannel() throws ChannelError {
+
+        if (isDestroying()) {
+            throw new ChannelError("Unable to alloc, connection is closing");
+        }
         
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Allocating a new channel, channel ref count is " + m_channelRefCount);
@@ -122,29 +135,29 @@ public class Connection implements Runnable {
     /**
      *  Decrease the reference count.
      *
-     *  @param addr The channel to dealloc.
+     *  @param channelPtr The channel to dealloc.
      */
-    synchronized void deallocChannel(int ch) {
+    void deallocChannel(int channelPtr) {
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", ch, "Deallocating a channel");
+            DebugHelper.debugPrint("Connection",
+                                    channelPtr,
+                                    "Deallocating a channel");
         }
-		
-        m_destroyingMutex.lock();
-        m_closingMutex.lock();
-        if (!m_destroying && !m_closing) {
-            m_closingMutex.unlock();
-            m_destroyingMutex.unlock();
 
-            m_openChannels.remove(ch);
-            
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", ch, "Size of openSteams is now " + m_openChannels.size());
-            }
-        } else  {
-            m_closingMutex.unlock();
-            m_destroyingMutex.unlock();
+        if (isDestroying()) {
+            // Ignore if we are destroying.
+            return;
         }
-      
+
+        m_openChannels.remove(channelPtr);
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Connection",
+                                    channelPtr,
+                                    "Size of openSteams is now "
+                                         + m_openChannels.size());
+        }
+
         --m_channelRefCount;
 
         checkRefCount();
@@ -153,22 +166,22 @@ public class Connection implements Runnable {
     /**
      *  Check if there are any more references to the connection.
      */
-    private synchronized void checkRefCount() {
-        if (m_channelRefCount == 0) {
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", 0, "No more refs, destroy connection");
-            }
-            
-            m_destroyingMutex.lock();
-            m_closingMutex.lock();
-            if (!m_destroying && !m_closing) {
-                m_closingMutex.unlock();
-                m_destroyingMutex.unlock();
-                destroy(new ChannelError("", 0x0));
-            } else {
-                m_closingMutex.unlock();
-                m_destroyingMutex.unlock();
-            }
+    private void checkRefCount() {
+
+        synchronized (this) {
+            if (m_channelRefCount != 0) {
+                return;
+            }            
+        }
+
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Connection",
+                                   0,
+                                   "No more refs, destroy connection");
+        }
+
+        if (isDestroying() == false) {
+            destroy(null);
         }
     }
 
@@ -179,64 +192,35 @@ public class Connection implements Runnable {
      *  @param request The request to open the channel.
      *  @return True if request went well, else false.
      */
-    boolean requestOpen(OpenRequest request) {
+    boolean requestOpen(OpenRequest request) throws ChannelError {
         int chcomp = request.getChannelId();
-        Queue<OpenRequest> queue;
-        OpenRequest currentRequest;
         Channel channel;
 
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", chcomp, "A channel is trying to send a new open request");
         }
 
-        if ((channel = m_openChannels.get(chcomp)) != null) {
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", chcomp, "The channel was already open, cancel the open request");
+        if (m_openChannels.containsKey(chcomp)) {
+            throw new ChannelError("Channel already open");
+        }
+
+        try {
+            if (!m_handshaked) {
+                connectConnection(m_host, m_port);
             }
-            return channel.setPendingOpenRequest(request);
+        } catch (ChannelError e) {
+            throw e;
         }
 
-        if ((currentRequest = m_pendingOpenRequests.get(chcomp)) != null) {
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", chcomp, "A open request is waiting to be sent, queue up the new open request");
-            }
-            return currentRequest.getChannel().setPendingOpenRequest(request);
+        synchronized (this) {
+            m_pendingOpenRequest = request;
         }
 
-        m_pendingOpenRequests.put(chcomp, request);
-
-        if (!m_connecting) {
-            m_connecting = true;
-            connectConnection(m_host, m_port);
-            return true;
-        }
-
-        if (m_handshaked) {
-            writeBytes(request.getFrame());
-            request.setSent(true);
-        }
+        writeBytes(request.getFrame());
 
         return true;
     }
-	
-    /**
-     *  Try to cancel an open request. Returns true on success else
-     *  false.
-     *
-     *  @param request The request to cancel.
-     *  @return True if the request was canceled.
-     */
-    public boolean cancelOpen(OpenRequest request) {
-        int channelcomp = request.getChannelId();
-      
-        if (request.isSent()) {
-            return false;
-        }
-      
-        m_pendingOpenRequests.remove(channelcomp);
-      
-        return true;
-    }
+
 	
     /**
      *  Connect the connection.
@@ -244,7 +228,8 @@ public class Connection implements Runnable {
      *  @param host The host to connect to.
      *  @param port The port to connect to.
      */
-    private void connectConnection(String host, int port) {
+    private void connectConnection(String host, int port)
+        throws ChannelError {
 		
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Connecting, attempt ");
@@ -268,22 +253,23 @@ public class Connection implements Runnable {
                 DebugHelper.debugPrint("Connection", 0, "Connected, sending HTTP upgrade request");
             }
         	
+            m_connecting = false;
             m_connected = true;
         	
             connectHandler();
         } catch (UnresolvedAddressException e) {
-            destroy(new ChannelError("The host \"" + host + "\" could not be resolved"));
+            m_connecting = false;
+            throw new ChannelError("The host \"" + host + "\" could not be resolved");
         } catch (IOException e) {
-            destroy(new ChannelError("Could not connect to the host \"" + host + "\" on the port " + port));
+            m_connecting = false;
+            throw new ChannelError("Could not connect to the host \"" + host + "\" on the port " + port);
         }
     }
 	
     /**
      *  Send HTTP upgrade request.
      */
-    private void connectHandler() {
-        boolean success = false;
-
+    private void connectHandler() throws ChannelError {
         try {
             m_outStream.writeBytes("GET / HTTP/1.1\r\n" +
                                    "Connection: upgrade\r\n" +
@@ -291,29 +277,28 @@ public class Connection implements Runnable {
                                    "Host: " + m_host);
 
             m_outStream.writeBytes("\r\n\r\n");
-            success = true;
-        } catch (IOException e) {
-            success = false;
-        }
-
-        if (!success) {
-            destroy(new ChannelError("Could not send upgrade request"));
-        } else {
             handshakeHandler();
+        } catch (IOException e) {
+            m_connected = false;
+            throw new ChannelError("Could not send upgrade request");
+        } catch (ChannelError e) {
+            m_connected = false;
+            throw e;
         }
     }
 	
     /**
      *  Handle the Handshake response frame.
      */
-    private void handshakeHandler() {
-        if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", 0, "Incoming upgrade response");
-        }
-        
+    private void handshakeHandler() throws ChannelError {
+        ChannelError error;
         boolean fieldsLeft = true;
         boolean gotResponse = false;
         
+        if (HydnaDebug.HYDNADEBUG) {
+            DebugHelper.debugPrint("Connection", 0, "Incoming upgrade response");
+        }
+                
         while (fieldsLeft) {
             String line;
         	
@@ -323,8 +308,8 @@ public class Connection implements Runnable {
                     fieldsLeft = false;
                 }
             } catch (IOException e) {
-                destroy(new ChannelError("Server responded with bad handshake"));
-                return;
+                error = new ChannelError("Server responded with bad handshake");
+                throw error;
             }
         	
             if (fieldsLeft) {
@@ -343,20 +328,21 @@ public class Connection implements Runnable {
                             try {
                                 code = Integer.parseInt(line.substring(pos1 + 1, pos2));
                             } catch (NumberFormatException e) {
-                                destroy(new ChannelError("Could not read the status from the response \"" + line + "\""));
+                                error = new ChannelError("Could not read " +
+                                                         "the status from " +
+                                                         "the response \"" +
+                                                         line + "\"");
+                                throw error;
                             }
                         }
                     }
-        			
-                    switch (code) {
-                        case 101:
-                        // Everything is ok, continue.
-                        break;
-                        default:
-                        destroy(new ChannelError("Server responded with bad HTTP response code, " + code));
-                        break;
+
+                    if (code != 101) {
+                        error = new ChannelError("Unexpected response " + 
+                                                 "code, " + code);
+                        throw error;
                     }
-        			
+
                     gotResponse = true;
                 } else {
                     line = line.toLowerCase();
@@ -366,32 +352,17 @@ public class Connection implements Runnable {
                     if (pos != -1) {
                         String header = line.substring(9);
                         if (!header.equals("winksock/1")) {
-                            destroy(new ChannelError("Bad protocol version: " + header));
-                            return;
+                            error = new ChannelError("Bad protocol version: " +
+                                                     header);
+                            throw error;
                         }
                     }
                 }
             }
         }
 
-        m_handshaked = true;
-        m_connecting = false;
-
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Handshake done on connection");
-        }
-
-        for (OpenRequest request : m_pendingOpenRequests.values()) {
-            writeBytes(request.getFrame());
-
-            if (m_connected) {
-                request.setSent(true);
-                if (HydnaDebug.HYDNADEBUG) {
-                    DebugHelper.debugPrint("Connection", request.getChannelId(), "Open request sent");
-                }
-            } else {
-                return;
-            }
         }
 
         if (HydnaDebug.HYDNADEBUG) {
@@ -402,9 +373,11 @@ public class Connection implements Runnable {
             m_listeningThread = new Thread(this);
             m_listeningThread.start();
         } catch (IllegalThreadStateException e) {
-            destroy(new ChannelError("Could not create a new thread for frame listening"));
-            return;
+            error = new ChannelError("Could not create listening thread");
+            throw error;
         }
+
+        m_handshaked = true;
     }
 	
     /**
@@ -421,20 +394,19 @@ public class Connection implements Runnable {
     public void receiveHandler() {
         int size;
         int headerSize = Frame.HEADER_SIZE;
-        int ch;
-        int op;
+        int channelPtr;
         int flag;
+        int ctype;
+        int op;
 
         ByteBuffer header = ByteBuffer.allocate(headerSize);
         header.order(ByteOrder.BIG_ENDIAN);
-        ByteBuffer payload;
+        ByteBuffer data;
 
         int offset = 0;
         int n = 1;
 
-        m_listeningMutex.lock();
         m_listening = true;
-        m_listeningMutex.unlock();
 
         for (;;) {
             try {
@@ -447,25 +419,19 @@ public class Connection implements Runnable {
             }
 
             if (n <= 0) {
-                m_listeningMutex.lock();
-                if (m_listening) {
-                    m_listeningMutex.unlock();
-                    destroy(new ChannelError("Could not read from the connection"));
-                } else {
-                    m_listeningMutex.unlock();
-                }
+                destroy(new ChannelError("Could not read from the connection"));
                 break;
             }
             
             header.flip();
 
             size = (int)header.getShort() & 0xFFFF;
-            payload = ByteBuffer.allocate(size - headerSize);
-            payload.order(ByteOrder.BIG_ENDIAN);
+            data = ByteBuffer.allocate(size - headerSize);
+            data.order(ByteOrder.BIG_ENDIAN);
 
             try {
                 while(offset < size && n >= 0) {
-                    n = m_socketChannel.read(payload);
+                    n = m_socketChannel.read(data);
                     offset += n;
                 }
             } catch (Exception e) {
@@ -473,44 +439,46 @@ public class Connection implements Runnable {
             }
 
             if (n <= 0) {
-                m_listeningMutex.lock();
-                if (m_listening) {
-                    m_listeningMutex.unlock();
-                    destroy(new ChannelError("Could not read from the connection"));
-                } else {
-                    m_listeningMutex.unlock();
-                }
+                destroy(new ChannelError("Could not read from the connection"));
                 break;
             }
 
-            payload.flip();
+            data.flip();
             
-            ch = header.getInt();
+            channelPtr = header.getInt();
             byte of = header.get();
-            op   = of >> 3 & 3;
-            flag = of & 7;
+
+            ctype = (of & Frame.CTYPE_BITMASK) >> Frame.CTYPE_BITPOS;
+            op = (of & Frame.OP_BITMASK) >> Frame.OP_BITPOS;
+            flag = (of & Frame.FLAG_BITMASK);
 
             switch (op) {
 
                 case Frame.OPEN:
                 if (HydnaDebug.HYDNADEBUG) {
-                    DebugHelper.debugPrint("Connection", ch, "Received open response");
+                    DebugHelper.debugPrint("Connection",
+                                            channelPtr,
+                                            "Received open response");
                 }
-                processOpenFrame(ch, flag, payload);
+                processOpenFrame(channelPtr, ctype, flag, data);
                 break;
 
                 case Frame.DATA:
                 if (HydnaDebug.HYDNADEBUG) {
-                    DebugHelper.debugPrint("Connection", ch, "Received data");
+                    DebugHelper.debugPrint("Connection",
+                                           channelPtr,
+                                           "Received data");
                 }
-                processDataFrame(ch, flag, payload);
+                processDataFrame(channelPtr, ctype, flag, data);
                 break;
 
                 case Frame.SIGNAL:
                 if (HydnaDebug.HYDNADEBUG) {
-                    DebugHelper.debugPrint("Connection", ch, "Received signal");
+                    DebugHelper.debugPrint("Connection",
+                                           channelPtr,
+                                           "Received signal");
                 }
-                processSignalFrame(ch, flag, payload);
+                processSignalFrame(channelPtr, ctype, flag, data);
                 break;
             }
 
@@ -530,13 +498,16 @@ public class Connection implements Runnable {
      *  @param errcode The error code of the open frame.
      *  @param payload The content of the open frame.
      */
-    private void processOpenFrame(int ch, int errcode, ByteBuffer payload) {
+    private void processOpenFrame(int channelPtr,
+                                  int ctype,
+                                  int flag,
+                                  ByteBuffer data) {
         OpenRequest request;
         Channel channel;
-        int respch = 0;
-        String message = "";
-        
-        request = m_pendingOpenRequests.get(ch);
+
+        synchronized (this) {
+            request = m_pendingOpenRequest;
+        }
 
         if (request == null) {
             destroy(new ChannelError("The server sent a invalid open frame"));
@@ -545,76 +516,77 @@ public class Connection implements Runnable {
 
         channel = request.getChannel();
 
-        if (errcode == Frame.OPEN_ALLOW) {
-            respch = ch;
-            
-            if (payload != null) {
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-            	
-                try {
-                    message = decoder.decode(payload).toString();
-                } catch (CharacterCodingException e) {
-                }
-            }
-        } else {
-            m_pendingOpenRequests.remove(ch);
+        synchronized (this) {
+            m_pendingOpenRequest = null;
+        }
 
-            String m = "";
-            if (payload != null && payload.capacity() > 0) {
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-                try {
-                    m = decoder.decode(payload).toString();
-                } catch (CharacterCodingException e) {}
-            }
+        if (flag == Frame.OPEN_ALLOW) {
+            m_openChannels.put(channelPtr, channel);
 
             if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", ch, "The server rejected the open request, errorcode " + errcode);
+                DebugHelper.debugPrint("Connection", channelPtr, "A new channel was added");
+                DebugHelper.debugPrint("Connection", channelPtr, "The size of openChannels is now " + m_openChannels.size());
             }
 
-            ChannelError error = ChannelError.fromOpenError(errcode, m);
-            channel.destroy(error);
+            channel.openSuccess(channelPtr, ctype, data);
+
             return;
         }
 
-        m_openChannels.put(respch, channel);
-
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", respch, "A new channel was added");
-            DebugHelper.debugPrint("Connection", respch, "The size of openChannels is now " + m_openChannels.size());
+            DebugHelper.debugPrint("Connection", channelPtr, "The server rejected the open request, errorcode " + flag);
         }
 
-        channel.openSuccess(respch, message);
-
-        m_pendingOpenRequests.remove(ch);
+        ChannelError error = ChannelError.fromOpenError(flag, ctype, data);
+        channel.destroy(error);
     }
 	
     /**
      *  Process a data frame.
      *
-     *  @param addr The address that should receive the data.
-     *  @param priority The priority of the data.
-     *  @param payload The content of the data.
+     *  @param channelPtr The channel pointer that should receive the data.
+     *  @param ctype The ContentType of the data.
+     *  @param flag The flag of the data.
+     *  @param data The data.
      */
-    private void processDataFrame(int ch, int priority, ByteBuffer payload) {
-        Channel channel = null;
-        ChannelData data;
+    private void processDataFrame(int channelPtr,
+                                  int ctype,
+                                  int flag,
+                                  ByteBuffer data) {
+        Channel channel;
+        ByteBuffer datac;
+        Iterator<Channel> it;
+        int size;
 
-        channel = m_openChannels.get(ch);
-
-        if (channel == null) {
-            destroy(new ChannelError("No channel was available to take care of the data received"));
-            return;
-        }
-
-        if (payload == null || payload.capacity() == 0) {
+        if (data == null || data.capacity() == 0) {
             destroy(new ChannelError("Zero data frame received"));
             return;
         }
 
-        data = new ChannelData(priority, payload);
-        channel.addData(data);
+        size = data.capacity();
+
+        if (channelPtr == 0) {
+            it = m_openChannels.values().iterator();
+            while (it.hasNext()) {
+                channel = it.next();
+                datac = ByteBuffer.allocate(size);
+                datac.put(data);
+                datac.flip();
+                data.rewind();
+                channel.addEvent(new ChannelData(channel, ctype, flag, datac));
+            }
+
+            return;   
+        }
+
+        channel = m_openChannels.get(channelPtr);
+
+        if (channel == null) {
+            destroy(new ChannelError("Invalid channel"));
+            return;
+        }
+
+        channel.addEvent(new ChannelData(channel, ctype, flag, data));
     }
 	
     /**
@@ -626,36 +598,31 @@ public class Connection implements Runnable {
      *  @return False is something went wrong.
      */
     private boolean processSignalFrame(Channel channel,
+                                       int ctype,
                                        int flag,
-                                       ByteBuffer payload) {
-        ChannelSignal signal;
+                                       ByteBuffer data) {
+        ChannelSignal signal = null;
+        ChannelError error = null;
 
-        if (flag != Frame.SIG_EMIT) {
-            String m = "";
-            if (payload != null && payload.capacity() > 0) {
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-	
-                try {
-                    m = decoder.decode(payload).toString();
-                } catch (CharacterCodingException e) {}
-            }
-            ChannelError error = new ChannelError("", 0x0);
+        switch (flag) {
 
-            if (flag != Frame.SIG_END) {
-                error = ChannelError.fromSigError(flag, m);
-            }
-
-            channel.destroy(error);
+            case Frame.SIG_EMIT:
+            signal = new ChannelSignal(channel, ctype, data);
+            channel.addEvent(signal);
             return false;
+
+            case Frame.SIG_END:
+            signal = new ChannelEndSignal(channel, ctype, data);
+            channel.destroy(signal);
+            return true;
+
+            default:
+            error = ChannelError.fromSigError(flag, 0, null);
+            channel.destroy(error);
+            return true;
+
         }
 
-        if (channel == null)
-            return false;
-
-        signal = new ChannelSignal(flag, payload);
-        channel.addSignal(signal);
-        return true;
     }
 	
     /**
@@ -665,65 +632,39 @@ public class Connection implements Runnable {
      *  @param flag The flag of the signal.
      *  @param payload The content of the signal.
      */
-    private void processSignalFrame(int ch, int flag, ByteBuffer payload) {
-        if (ch == 0) {
+    private void processSignalFrame(int channelPtr,
+                                    int ctype,
+                                    int flag,
+                                    ByteBuffer data) {
+        if (channelPtr == 0) {
             boolean destroying = false;
-            int size = payload.capacity();
-
-            if (flag != Frame.SIG_EMIT || payload == null || size == 0) {
-                destroying = true;
-
-                m_closingMutex.lock();
-                m_closing = true;
-                m_closingMutex.unlock();
-            }
+            int size = data.capacity();
 
             Iterator<Channel> it = m_openChannels.values().iterator();
             while (it.hasNext()) {
                 Channel channel = it.next();
-                ByteBuffer payloadCopy = ByteBuffer.allocate(size);
-                payloadCopy.put(payload);
-                payloadCopy.flip();
-                payload.rewind();
+                ByteBuffer datac = ByteBuffer.allocate(size);
+                datac.put(data);
+                datac.flip();
+                datac.rewind();
 
-                if (!destroying && channel == null) {
-                    destroying = true;
-
-                    m_closingMutex.lock();
-                    m_closing = true;
-                    m_closingMutex.unlock();
-                }
-
-                if (!processSignalFrame(channel, flag, payloadCopy)) {
+                if (processSignalFrame(channel, ctype, flag, datac) == false) {
                     it.remove();
                 }
             }
 
-            if (destroying) {
-                m_closingMutex.lock();
-                m_closing = false;
-                m_closingMutex.unlock();
-
-                checkRefCount();
-            }
+            checkRefCount();
         } else {
             Channel channel = null;
 
-            channel = m_openChannels.get(ch);
+            channel = m_openChannels.get(channelPtr);
 
             if (channel == null) {
                 destroy(new ChannelError("Received unknown channel"));
                 return;
             }
 
-            if (flag != Frame.SIG_EMIT && !channel.isClosing()) {
-                Frame frame = new Frame(ch, Frame.SIGNAL, Frame.SIG_END, payload);
-                writeBytes(frame);
-
-                return;
-            }
-
-            processSignalFrame(channel, flag, payload);
+            processSignalFrame(channel, ctype, flag, data);
         }
     }
 	
@@ -733,35 +674,46 @@ public class Connection implements Runnable {
      *  @error The cause of the destroy.
      */
     private void destroy(ChannelError error) {
-        m_destroyingMutex.lock();
-        m_destroying = true;
-        m_destroyingMutex.unlock();
 
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection",0, "Destroying connection because: " + error.getMessage());
+            DebugHelper.debugPrint("Connection",
+                                   0,
+                                   "Destroying connection because: "
+                                       + error.getMessage());
         }
+
+        disposeConnection(this);
+
+        synchronized (this) {
+            m_destroying = true;
+            m_handshaked = false;
+        }
+
+        if (m_pendingOpenRequest != null) {
+            m_pendingOpenRequest.getChannel().destroy(error);
+            m_pendingOpenRequest = null;
+        }
+
+        // It is safe to reset this members, its only
+        // receiver that access them.
+        m_listening = false;
 
         if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", 0, "Destroying pendingOpenRequests of size " + m_pendingOpenRequests.size());
+            DebugHelper.debugPrint("Connection",
+                                   0,
+                                   "Destroying openChannels of size "
+                                       + m_openChannels.size());
         }
 
-        for (OpenRequest request : m_pendingOpenRequests.values()) {
-            if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", request.getChannelId(), "Destroying channel");
-            }
-            request.getChannel().destroy(error);
-        }
-        m_pendingOpenRequests.clear();
-
-        if (HydnaDebug.HYDNADEBUG) {
-            DebugHelper.debugPrint("Connection", 0, "Destroying openChannels of size " + m_openChannels.size());
-        }
         for (Channel channel : m_openChannels.values()) {
             if (HydnaDebug.HYDNADEBUG) {
-                DebugHelper.debugPrint("Connection", channel.getChannel(), "Destroying channel");
+                DebugHelper.debugPrint("Connection",
+                                       channel.getChannelPtr(),
+                                       "Destroying channel");
             }
             channel.destroy(error);
         }				
+
         m_openChannels.clear();
 
 
@@ -769,64 +721,63 @@ public class Connection implements Runnable {
             if (HydnaDebug.HYDNADEBUG) {
                 DebugHelper.debugPrint("Connection", 0, "Closing connection");
             }
-            m_listeningMutex.lock();
-            m_listening = false;
-            m_listeningMutex.unlock();
 
             try {
                 m_socketChannel.close();
-            } catch (IOException e) {}
+            } catch (IOException e) {
+            } finally {
+                m_socketChannel = null;
+            }
 
             m_connected = false;
-            m_handshaked = false;
         }
-
-        String ports = Short.toString(m_port);
-        String key = m_host + ports;
-
-        m_connectionMutex.lock();
-        if (m_availableConnections.containsKey(key)) {
-            m_availableConnections.remove(key);
-        }
-        m_connectionMutex.unlock();
 
         if (HydnaDebug.HYDNADEBUG) {
             DebugHelper.debugPrint("Connection", 0, "Destroying connection done");
         }
 
-        m_destroyingMutex.lock();
-        m_destroying = false;
-        m_destroyingMutex.unlock();
+        synchronized (this) {
+            m_destroying = false;
+        }
     }
-	
+
+
     /**
      *  Writes a frame to the connection.
      *
      *  @param frame The frame to be sent.
      *  @return True if the frame was sent.
      */
-    public boolean writeBytes(Frame frame) {
-        if (m_handshaked) {
-            int n = -1;
-            ByteBuffer data = frame.getData();
-            int size = data.capacity();
-            int offset = 0;
+    boolean writeBytes(Frame frame) {
 
-            try {
-                while(offset < size) {
-                    n = m_socketChannel.write(data);
-                    offset += n;
-                }
-            } catch (Exception e) {
-                n = -1;
-            }
-
-            if (n <= 0) {
-                destroy(new ChannelError("Could not write to the connection"));
+        synchronized (this) {
+            if (m_handshaked == false ||
+                m_destroying == true) {
                 return false;
             }
-            return true;
         }
-        return false;
+
+        int n = -1;
+        ByteBuffer data = frame.getData();
+        int size = data.capacity();
+        int offset = 0;
+
+        try {
+            while(offset < size) {
+                n = m_socketChannel.write(data);
+                offset += n;
+            }
+        } catch (Exception e) {
+            n = -1;
+        }
+
+        if (n <= 0) {
+            // We do not destroy the connection at this point, even if we
+            // we have a write error. The receiveHandler will take care of
+            // it.
+            return false;
+        }
+
+        return true;
     }
 }
