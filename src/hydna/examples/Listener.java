@@ -6,6 +6,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 
 import hydna.Channel;
+import hydna.ChannelEvent;
 import hydna.ChannelData;
 import hydna.ChannelError;
 import hydna.ChannelMode;
@@ -14,29 +15,39 @@ import hydna.ChannelMode;
  *  Listener example
  */
 public class Listener {
-    public static void main(String[] args) throws CharacterCodingException, ChannelError, InterruptedException {
-        Channel channel = new Channel();
-        channel.connect("public.hydna.net/1", ChannelMode.READWRITE);
+    public static void main(String[] args)
+        throws CharacterCodingException, ChannelError, InterruptedException {
 
-        while(!channel.isConnected()) {
-            channel.checkForChannelError();
-            Thread.sleep(1000);
+        ChannelEvent event;
+
+        Channel channel = new Channel();
+        event = channel.connect("public.hydna.net", ChannelMode.READWRITE);
+
+        // Check if channel sent a welcome message on open.
+        if (event != null) {
+            System.out.println("[WELCOME]: " + event.getString());
         }
 
-        for (;;) {
-            if (!channel.isDataEmpty()) {
-                ChannelData data = channel.popData();
-                ByteBuffer payload = data.getContent();
+        System.out.println("Press Ctrl-C to abort the receive loop");
 
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-				
-                String m = decoder.decode(payload).toString();
-				
-                System.out.println(m);
-            } else {
-                channel.checkForChannelError();
+        for (;;) {
+            if (channel.hasEvents()) {
+                event = channel.nextEvent();
+                if (event instanceof ChannelData) {
+                    if (event.isUtf8Content()) {
+                        System.out.println("[DATA]" + event.getString());
+                    } else {
+                        System.out.println("[DATA] <binary>");
+                    }
+                } else {
+                    if (event.isUtf8Content()) {
+                        System.out.println("[SIGNAL]" + event.getString());
+                    } else {
+                        System.out.println("[SIGNAL] <binary>");
+                    }
+                }
             }
+            Thread.sleep(1);
         }
     }
 }

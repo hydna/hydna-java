@@ -6,7 +6,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetDecoder;
 
 import hydna.Channel;
-import hydna.ChannelData;
+import hydna.ChannelEvent;
 import hydna.ChannelError;
 import hydna.ChannelMode;
 
@@ -16,62 +16,35 @@ import hydna.ChannelMode;
 public class MultipleChannels {
     public static void main(String[] args)
         throws CharacterCodingException, ChannelError, InterruptedException {
-        Channel channel = new Channel();
-        channel.connect("public.hydna.net/1", ChannelMode.READWRITE);
+
+        ChannelEvent event;
+
+        Channel channel1 = new Channel();
+        channel1.connect("public.hydna.net/channel1", ChannelMode.READWRITE);
 	    
         Channel channel2 = new Channel();
-        channel2.connect("public.hydna.net/2", ChannelMode.READWRITE);
-	
-        while(!channel.isConnected()) {
-            channel.checkForChannelError();
-            Thread.sleep(1000);
-        }
-	    
-        while(!channel2.isConnected()) {
-            channel2.checkForChannelError();
-            Thread.sleep(1000);
-        }
-	
-        channel.writeString("Hello");
-        channel2.writeString("World");
-	
+        channel2.connect("public.hydna.net/channel2", ChannelMode.READWRITE);
+
+        channel1.send("Hello");
+        channel2.send("World");
+
         for (;;) {
-            if (!channel.isDataEmpty()) {
-                ChannelData data = channel.popData();
-                ByteBuffer payload = data.getContent();
-	
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-				
-                String m = decoder.decode(payload).toString();
-				
-                System.out.println(m);
-            	
+            if (channel1.hasEvents()) {
+                event = channel1.nextEvent();
+                System.out.println(event.getString());
+                channel1.close();
+            }
+
+            if (channel2.hasEvents()) {
+                event = channel2.nextEvent();
+                System.out.println(event.getString());
+                channel2.close();
+            }
+
+            if (channel1.isConnected() == false &&
+                channel2.isConnected() == false) {
                 break;
-            } else {
-                channel.checkForChannelError();
             }
         }
-	    
-        for (;;) {
-            if (!channel2.isDataEmpty()) {
-                ChannelData data = channel2.popData();
-                ByteBuffer payload = data.getContent();
-	
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-				
-                String m = decoder.decode(payload).toString();
-				
-                System.out.println(m);
-            	
-                break;
-            } else {
-                channel2.checkForChannelError();
-            }
-        }
-	    
-        channel.close();
-        channel2.close();
     }
 }

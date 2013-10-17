@@ -1,6 +1,7 @@
 package hydna.examples;
 
 import hydna.Channel;
+import hydna.ChannelEvent;
 import hydna.ChannelData;
 import hydna.ChannelError;
 import hydna.ChannelMode;
@@ -9,32 +10,23 @@ import hydna.ChannelMode;
  *  Hello world example
  */
 public class HelloWorld {
-    public static void main(String[] args) throws ChannelError, InterruptedException {
+    public static void main(String[] args)
+        throws ChannelError, InterruptedException {
+
         Channel channel = new Channel();
         channel.connect("public.hydna.net", ChannelMode.READWRITE);
-	
-        while(!channel.isConnected()) {
-            channel.checkForChannelError();
-            Thread.sleep(1000);
-        }
-	    
-        String message = channel.getMessage();
 
-        if (!message.equals("")) {
-            System.out.println(message);
-        }
+        // Send a "hello world" to public domain
+        channel.send("Hello world from java");
 
-        channel.writeString("Hello world from java");
+        // The method "nextEvent()" is blocking. See "Listener.java"
+        // for an example how to receive without blocking, using
+        // the method "hasEvents()".
+        ChannelEvent event = channel.nextEvent();
+        System.out.println(event.getString());
 
-        for (;;) {
-            if (!channel.isDataEmpty()) {
-                ChannelData data = channel.popData();
-                System.out.println(data.getString());
-                break;
-            } else {
-                channel.checkForChannelError();
-            }
-        }
+        // Close the channel, which terminates the underlying
+        // receive-loop.
         channel.close();
     }
 }

@@ -1,13 +1,11 @@
 package hydna.examples;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
 
 import hydna.Channel;
 import hydna.ChannelError;
 import hydna.ChannelMode;
+import hydna.ChannelEvent;
 import hydna.ChannelSignal;
 
 /**
@@ -15,39 +13,25 @@ import hydna.ChannelSignal;
  */
 public class Signals {
     public static void main(String[] args)
-    throws CharacterCodingException, ChannelError, InterruptedException {
+        throws ChannelError, InterruptedException {
+
         Channel channel = new Channel();
-        channel.connect("public.hydna.net/1", ChannelMode.READWRITEEMIT);
+        String url = "public.hydna.net/ping-back";
+        channel.connect(url, ChannelMode.READWRITEEMIT);
 
-        while(!channel.isConnected()) {
-            channel.checkForChannelError();
-            Thread.sleep(1000);
+        // Send an emit with message "ping" to server
+        channel.emit("ping");
+
+        // Wait for a PONG response
+        ChannelEvent event = channel.nextEvent();
+
+        // Check that it was a Signal that we really got
+        if (event instanceof ChannelSignal) {
+            System.out.println(event.getString());
+        } else {
+            System.out.println("Expected a pong response");
         }
 
-        String message = channel.getMessage();
-        if (!message.equals("")) {
-            System.out.println(message);
-        }
-	    
-        channel.emitString("ping");
-
-        for (;;) {
-            if (!channel.isSignalEmpty()) {
-                ChannelSignal signal = channel.popSignal();
-                ByteBuffer payload = signal.getContent();
-
-                Charset charset = Charset.forName("US-ASCII");
-                CharsetDecoder decoder = charset.newDecoder();
-				
-                String m = decoder.decode(payload).toString();
-				
-                System.out.println(m);
-	            
-                break;
-            } else {
-                channel.checkForChannelError();
-            }
-        }
         channel.close();
     }
 }
