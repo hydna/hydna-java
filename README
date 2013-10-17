@@ -1,18 +1,49 @@
-hydna-java
+Java bindings for Hydna
+=======================
 
-Emanuel Dahlberg
+This is the offical Java bingdings for the Hydna Platform (www.hydna.com).
 
-http://github.com/EmanueI
-===================================================================
+The product is currently in beta. It is well tested, but please report any
+issue that may occure.
 
-The framework is compiled through Eclipse
-and four example targets can also be built.
+Please see usage examples in "src/main/java/comhydna/examples".
+
+**Please note, this implementation is NOT thread-safe**
 
 
+##Installation
 
-info
--------------------------------------------------------------------
-All the source files can be found in src/hydna/ with comments.
+The library and examples can be built using `make`:
+    
+      $ make
 
-The examples are located in src/hydna/examples.
+Verify by running the "Hello world" demo:
 
+      $ make hello
+
+
+##Examples
+This software includes the four examples, "HelloWorld", "Listener", "MultipleChannels" and "Singals".
+
+### HelloWorld.java
+A simple "send, wait and receive" example.
+
+### Listener.java
+Sets up an receive-loop that waits for data and signals.
+
+### MultipleChannels.java
+Sets up two channels and waits for data.
+
+### Signals.java
+Pings the server and waits for a "pong". Please note that your server
+need to answer with a "pong" for this demo to work.
+
+
+Bugs, issues and suggestions
+----------------------------
+Please use Githubs issue system at https://github.com/hydna/hydna-java/issues
+
+
+Copyright
+---------
+Hydna AB (c) 2010-2013 
