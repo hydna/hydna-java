@@ -417,13 +417,12 @@ public class Connection implements Runnable {
      */
     public void receiveHandler() {
         int size;
-        int headerSize = Frame.HEADER_SIZE;
         int channelPtr;
         int flag;
         int ctype;
         int op;
 
-        ByteBuffer header = ByteBuffer.allocate(headerSize);
+        ByteBuffer header = ByteBuffer.allocate(Frame.HEADER_SIZE + 2);
         header.order(ByteOrder.BIG_ENDIAN);
         ByteBuffer data;
 
@@ -434,7 +433,7 @@ public class Connection implements Runnable {
 
         for (;;) {
             try {
-                while(offset < headerSize && n >= 0) {
+                while(offset < Frame.HEADER_SIZE + 2 && n >= 0) {
                     n = m_socketChannel.read(header);
                     offset += n;
                 }
@@ -446,15 +445,15 @@ public class Connection implements Runnable {
                 destroy(new ChannelError("Could not read from the connection"));
                 break;
             }
-            
+
             header.flip();
 
             size = (int)header.getShort() & 0xFFFF;
-            data = ByteBuffer.allocate(size - headerSize);
+            data = ByteBuffer.allocate(size - Frame.HEADER_SIZE);
             data.order(ByteOrder.BIG_ENDIAN);
 
             try {
-                while(offset < size && n >= 0) {
+                while(offset < size + 2 && n >= 0) {
                     n = m_socketChannel.read(data);
                     offset += n;
                 }
