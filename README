@@ -1,10 +1,10 @@
 Java bindings for Hydna
 =======================
 
-This is the offical Java bindings for the Hydna Platform (www.hydna.com).
+These are the official Java bindings for the Hydna Platform (www.hydna.com).
 
 The product is currently in beta. It is well tested, but please report any
-issue that may occure.
+issue that may occur.
 
 Please see usage examples in "src/main/java/com/hydna/examples".
 
