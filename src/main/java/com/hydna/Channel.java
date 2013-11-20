@@ -152,8 +152,7 @@ public class Channel {
             }
         }
 
-        if (mode == 0x04 ||
-            mode < ChannelMode.READ || 
+        if (mode < ChannelMode.LISTEN || 
             mode > ChannelMode.READWRITEEMIT) {
             throw new ChannelError("Invalid channel mode");
         }
