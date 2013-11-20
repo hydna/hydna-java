@@ -16,7 +16,7 @@ public class Binary {
         throws ChannelError, InterruptedException {
 
         Channel channel = new Channel();
-        channel.connect("test-beta.hydna.net", ChannelMode.READWRITE);
+        channel.connect("public.hydna.net", ChannelMode.READWRITE);
 
         // Create a new buffer with the bytes [1, 2, 3]
         ByteBuffer buffer = ByteBuffer.allocate(3);
