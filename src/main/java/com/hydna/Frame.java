@@ -34,7 +34,7 @@ class Frame {
     
 
     // Upper payload limit (10kb)
-    static final int PAYLOAD_MAX_LIMIT = 0xFFFFFF - HEADER_SIZE;
+    static final int PAYLOAD_MAX_LIMIT = 0xFFFF - HEADER_SIZE;
 	
     private ByteBuffer m_bytes;
 	

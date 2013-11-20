@@ -152,7 +152,7 @@ public class Channel {
             }
         }
 
-        if (mode < ChannelMode.LISTEN || 
+        if (mode < ChannelMode.LISTEN ||
             mode > ChannelMode.READWRITEEMIT) {
             throw new ChannelError("Invalid channel mode");
         }
