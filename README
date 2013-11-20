@@ -1,12 +1,12 @@
 Java bindings for Hydna
 =======================
 
-This is the offical Java bingdings for the Hydna Platform (www.hydna.com).
+This is the offical Java bindings for the Hydna Platform (www.hydna.com).
 
 The product is currently in beta. It is well tested, but please report any
 issue that may occure.
 
-Please see usage examples in "src/main/java/comhydna/examples".
+Please see usage examples in "src/main/java/com/hydna/examples".
 
 **Please note, this implementation is NOT thread-safe**
 
@@ -23,19 +23,19 @@ Verify by running the "Hello world" demo:
 
 
 ##Examples
-This software includes the four examples, "HelloWorld", "Listener", "MultipleChannels" and "Singals".
+This software includes the four examples, "HelloWorld", "Listener", "MultipleChannels" and "Signals".
 
 ### HelloWorld.java
 A simple "send, wait and receive" example.
 
 ### Listener.java
-Sets up an receive-loop that waits for data and signals.
+Sets up a receive-loop that waits for data and signals.
 
 ### MultipleChannels.java
 Sets up two channels and waits for data.
 
 ### Signals.java
-Pings the server and waits for a "pong". Please note that your server
+Pings the server and waits for a "pong". Please note that your behavior
 need to answer with a "pong" for this demo to work.
 
 
