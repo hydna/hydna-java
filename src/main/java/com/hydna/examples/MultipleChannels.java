@@ -7,6 +7,7 @@ import java.nio.charset.CharsetDecoder;
 
 import com.hydna.Channel;
 import com.hydna.ChannelEvent;
+import com.hydna.ChannelEndSignal;
 import com.hydna.ChannelError;
 import com.hydna.ChannelMode;
 
@@ -31,14 +32,22 @@ public class MultipleChannels {
         for (;;) {
             if (channel1.hasEvents()) {
                 event = channel1.nextEvent();
-                System.out.println(event.getString());
-                channel1.close();
+                if (event instanceof ChannelEndSignal) {
+                    System.out.println("Channel 1 is now closed");
+                } else {
+                    System.out.println(event.getString());
+                    channel1.close();
+                }
             }
 
             if (channel2.hasEvents()) {
                 event = channel2.nextEvent();
-                System.out.println(event.getString());
-                channel2.close();
+                if (event instanceof ChannelEndSignal) {
+                    System.out.println("Channel 2 is now closed");
+                } else {
+                    System.out.println(event.getString());
+                    channel2.close();
+                }
             }
 
             if (channel1.isConnected() == false &&
